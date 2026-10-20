@@ -1,512 +1,171 @@
-/* =========================================================
-   MÓDULO 1 — PARSER
-   ========================================================= */
-function importarQuestoes(texto) {
-  if (!texto || !texto.trim()) return [];
-  const linhas = texto.replace(/\r\n/g, '\n').split('\n');
-  const questoes = [];
-  const textosBase = {};
+:root {
+  --primary:#2563eb; --primary-dark:#1d4ed8;
+  --success:#16a34a; --success-bg:#dcfce7;
+  --danger:#dc2626; --danger-bg:#fee2e2;
+  --bg:#f1f5f9; --card:#fff; --text:#1e293b;
+  --muted:#64748b; --border:#e2e8f0;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+     background:var(--bg);color:var(--text);line-height:1.6;min-height:100vh;padding:20px}
+.container{max-width:850px;margin:0 auto}
+header{text-align:center;margin-bottom:24px}
+header h1{font-size:1.8rem;color:var(--primary-dark);margin-bottom:4px}
+header p{color:var(--muted);font-size:.95rem}
+.card{background:var(--card);border-radius:12px;padding:24px;
+      box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:20px}
+h2{font-size:1.15rem;margin-bottom:6px}
+.hint{font-size:.85rem;color:var(--muted);margin-bottom:12px}
+textarea{width:100%;min-height:180px;padding:12px;border:1px solid var(--border);
+         border-radius:8px;font-family:ui-monospace,Consolas,monospace;font-size:.85rem;
+         resize:vertical;background:#fafafa}
+textarea:focus{outline:none;border-color:var(--primary);background:#fff}
+.status{font-size:.85rem;margin-top:8px;padding:6px 10px;border-radius:6px;display:inline-block}
+.status.ok{background:var(--success-bg);color:var(--success)}
+.status.error{background:var(--danger-bg);color:var(--danger)}
+.status.empty{background:#f1f5f9;color:var(--muted)}
+button{font-family:inherit;font-size:.95rem;font-weight:600;border:none;
+       border-radius:8px;padding:12px 22px;cursor:pointer;transition:all .15s}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover:not(:disabled){background:var(--primary-dark)}
+.btn-secondary{background:#e2e8f0;color:var(--text)}
+.btn-secondary:hover:not(:disabled){background:#cbd5e1}
+button:disabled{opacity:.5;cursor:not-allowed}
+.actions{display:flex;gap:12px;flex-wrap:wrap;justify-content:space-between;align-items:center}
+.progress-bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-bottom:20px}
+.progress-fill{height:100%;background:var(--primary);transition:width .3s ease}
+.question-meta{font-size:.85rem;color:var(--muted);margin-bottom:8px;
+               display:flex;justify-content:space-between;align-items:center}
+.question-meta .right{display:flex;align-items:center;gap:8px}
+.btn-toggle{background:transparent;border:1px solid var(--border);border-radius:6px;
+            padding:3px 8px;font-size:.8rem;cursor:pointer;color:var(--muted);
+            font-weight:500;line-height:1.2}
+.btn-toggle:hover{background:#f1f5f9;color:var(--text)}
 
-  const reQuestao = /^\s*(\d+)\s*[\.\)]\s*(.*)$/;
-  const reModulo = /^\s*(?:[📝📌🔹📘📗📕🎯💡✨]\s*)*M[ÓO]DULO\b/i;
-  const reRotulo = /^\s*Quest[õo]es\s+\d+\s+a\s+\d+\s*(?:\(.*?\))?\s*:?\s*$/i;
-  const reSeparador = /^\s*[_\-–—=]{3,}\s*$/;
+/* Alteração na caixa de aviso do texto base */
+.text-base{background:#f8fafc;border-left:4px solid var(--primary);padding:12px 16px;
+           border-radius:6px;font-size:.95rem;color:var(--text);margin-bottom:16px;
+           display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;}
 
-  // Função auxiliar para detectar se uma linha é um cabeçalho de texto-base
-  const getCabecalhoTexto = (txt) => {
-    const m = txt.match(/(?:quest[õo]es?|questions?)(?:\s+de\s+n[úu]meros?)?\s+(\d+)(?:\s*(?:a|até|à|to|–|-|—)\s*(\d+))?/i);
-    if (m && /texto|trecho|considere|atenção|leia|text\b|read\b|responda|answer/i.test(txt)) {
-      return { de: parseInt(m[1], 10), ate: m[2] ? parseInt(m[2], 10) : parseInt(m[1], 10) };
-    }
-    return null;
-  };
+.question-text{font-size:1.05rem;font-weight:600;margin-bottom:18px;white-space:pre-line}
+.options{display:flex;flex-direction:column;gap:10px}
+.option{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;
+        border:2px solid var(--border);border-radius:8px;cursor:pointer;
+        transition:all .15s;background:#fff;font-size:.95rem}
+.option:hover{border-color:#cbd5e1;background:#f8fafc}
+.option.selected{border-color:var(--primary);background:#eff6ff}
+.option-letter{font-weight:700;color:var(--primary);min-width:22px;flex-shrink:0}
+.score-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+               gap:16px;margin-bottom:24px}
+.score-box{text-align:center;padding:20px;border-radius:10px;background:#f8fafc}
+.score-box .num{font-size:2.2rem;font-weight:700;display:block;line-height:1}
+.score-box .label{font-size:.85rem;color:var(--muted);margin-top:6px}
+.score-box.correct .num{color:var(--success)}
+.score-box.wrong .num{color:var(--danger)}
+.score-box.percent .num{color:var(--primary)}
+.result-item{border-left:4px solid var(--success);background:#f8fafc;
+             border-radius:6px;padding:16px;margin-bottom:14px}
+.result-item.incorrect{border-left-color:var(--danger);background:var(--danger-bg)}
+.result-item h3{font-size:.95rem;margin-bottom:10px;display:flex;
+                align-items:center;gap:8px;flex-wrap:wrap}
+.badge{font-size:.75rem;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:uppercase}
+.badge.ok{background:var(--success);color:#fff}
+.badge.no{background:var(--danger);color:#fff}
+.result-options{display:flex;flex-direction:column;gap:6px;margin:10px 0;font-size:.88rem}
+.result-options .opt{padding:6px 10px;border-radius:5px;color:#475569}
+.result-options .opt.correct{background:var(--success-bg);color:var(--success);font-weight:600}
+.result-options .opt.wrong{background:#fef2f2;color:var(--danger);text-decoration:line-through}
+.comment{margin-top:10px;padding-top:10px;border-top:1px dashed #cbd5e1;
+         font-size:.88rem;color:#475569}
+.comment strong{color:var(--text)}
+.hidden{display:none}
 
-  /* PASSO 1: mapear textos-base por intervalo */
-  for (let i = 0; i < linhas.length; i++) {
-    const t = linhas[i].trim();
-    if (!t || reQuestao.test(t)) continue;
+.unanswered-card h2{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.unanswered-count{font-size:.85rem;color:var(--muted);font-weight:500}
+.unanswered-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;min-height:34px}
+.unanswered-chip{padding:6px 14px;background:#eff6ff;color:var(--primary);
+                 border:1px solid #bfdbfe;border-radius:20px;cursor:pointer;
+                 font-size:.85rem;font-weight:600;font-family:inherit;
+                 transition:all .15s;line-height:1.2}
+.unanswered-chip:hover{background:var(--primary);color:#fff;border-color:var(--primary);
+                       transform:translateY(-1px)}
+.all-done{color:var(--success);font-size:.9rem;font-weight:600;display:flex;align-items:center;gap:6px}
 
-    const cab = getCabecalhoTexto(t);
-    if (cab) {
-      const { de, ate } = cab;
-      let conteudoLinhas = [];
-      let j = i;
-      
-      // Acumula as linhas do texto até encontrar a próxima questão ou outro texto-base
-      while (j < linhas.length) {
-        const nt = linhas[j].trim();
-        if (j > i && reQuestao.test(nt)) break;
-        if (j > i && getCabecalhoTexto(nt)) break;
-        
-        if (nt) conteudoLinhas.push(nt);
-        j++;
-      }
-      
-      let conteudo = conteudoLinhas.join(' ');
-      
-      // Limpeza do cabeçalho para manter apenas o texto em si
-      conteudo = conteudo.replace(/^Atenção:.*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
-      conteudo = conteudo.replace(/^Para responder.*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
-      conteudo = conteudo.replace(/^.*?quest[õo]es?\s+(\d+)(?:\s*a\s*(\d+))?\s*:\s*/i, '');
-      conteudo = conteudo.replace(/^.*?questions?\s+(\d+)(?:\s*to\s*(\d+))?\s*:\s*/i, '');
-      conteudo = conteudo.replace(/^["“”'‘’]+/, '').replace(/["“”'‘’]+$/, '').trim();
-      
-      if (conteudo) {
-        for (let n = de; n <= ate; n++) textosBase[n] = conteudo;
-      }
-      i = j - 1;
-    }
-  }
-
-  /* PASSO 2: extrair questões (suporte robusto a multilinhas) */
-  let i = 0;
-  while (i < linhas.length) {
-    const t = linhas[i].trim();
-
-    if (!t || reModulo.test(t) || reRotulo.test(t) || reSeparador.test(t)) {
-      i++; continue;
-    }
-
-    const m = t.match(reQuestao);
-    if (!m) { i++; continue; }
-
-    const numero = parseInt(m[1], 10);
-    let bloco = m[2];
-
-    // Acumula todas as linhas seguintes até encontrar a próxima questão ou um novo texto-base
-    let j = i + 1;
-    while (j < linhas.length) {
-      const nt = linhas[j].trim();
-      if (!nt) { bloco += '\n'; j++; continue; }
-      
-      // Para se encontrar um novo módulo, nova questão ou um novo texto-base
-      if (reModulo.test(nt) || reQuestao.test(nt) || getCabecalhoTexto(nt)) break;
-
-      bloco += '\n' + nt;
-      j++;
-    }
-    i = j;
-
-    // Extrai as alternativas
-    const blocoLinear = bloco.replace(/\n+/g, ' ').trim();
-    const alternativas = {};
-    const reAlt = /\(([A-E])\)\s*(.*?)(?=\s*\([A-E]\)|$)/g;
-    let am;
-    while ((am = reAlt.exec(blocoLinear)) !== null) {
-      const txt = am[2].trim().replace(/[.;:]+\s*$/, '').trim();
-      if (txt) alternativas[am[1]] = txt;
-    }
-    if (Object.keys(alternativas).length === 0) continue;
-
-    // Extrai o enunciado
-    const idxAlt = bloco.search(/\([A-E]\)/);
-    const enunciadoRaw = idxAlt >= 0 ? bloco.slice(0, idxAlt) : bloco;
-    const enunciado = enunciadoRaw
-      .split('\n')
-      .map(l => l.trim())
-      .filter(Boolean)
-      .join('\n');
-
-    questoes.push({
-      numero,
-      enunciado,
-      alternativas,
-      textoBase: textosBase[numero] || null
-    });
-  }
-
-  questoes.sort((a, b) => a.numero - b.numero);
-  return questoes;
+.btn-finish.ready{animation:pulse 1.6s infinite}
+@keyframes pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(37,99,235,.55)}
+  50%{box-shadow:0 0 0 10px rgba(37,99,235,0)}
 }
 
-function importarGabarito(texto) {
-  if (!texto || !texto.trim()) return {};
-  const linhas = texto.replace(/\r\n/g, '\n').split('\n');
-  const gabarito = {};
-  const reInicio = /^\s*(\d+)\s*[\.\)]\s*([A-E])\s*[—\-–:.]\s*(.*)$/;
-  let numeroAtual = null;
-
-  for (const linha of linhas) {
-    if (!linha.trim()) continue;
-    const m = linha.match(reInicio);
-    if (m) {
-      numeroAtual = parseInt(m[1], 10);
-      gabarito[numeroAtual] = { letra: m[2], comentario: m[3].trim() };
-    } else if (numeroAtual !== null) {
-      gabarito[numeroAtual].comentario += ' ' + linha.trim();
-    }
-  }
-  return gabarito;
+/* --- ESTILOS DO MODAL (POPUP) --- */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 20px;
 }
-
-/* =========================================================
-   MÓDULO 2 — ESTADO E ELEMENTOS
-   ========================================================= */
-const state = {
-  questoes: [], gabarito: {},
-  indiceAtual: 0, respostas: {}, acertos: 0,
-  acertosVisivel: true
-};
-
-const els = {
-  stepImport: document.getElementById('step-import'),
-  stepQuiz: document.getElementById('step-quiz'),
-  stepResult: document.getElementById('step-result'),
-  inputQuestions: document.getElementById('input-questions'),
-  inputGabarito: document.getElementById('input-gabarito'),
-  statusQuestions: document.getElementById('status-questions'),
-  statusGabarito: document.getElementById('status-gabarito'),
-  btnStart: document.getElementById('btn-start'),
-  btnExample: document.getElementById('btn-example'),
-  btnRecheck: document.getElementById('btn-recheck'),
-  btnNext: document.getElementById('btn-next'),
-  btnPrev: document.getElementById('btn-prev'),
-  btnFinish: document.getElementById('btn-finish'),
-  btnQuit: document.getElementById('btn-quit'),
-  btnToggleScore: document.getElementById('btn-toggle-score'),
-  btnRestart: document.getElementById('btn-restart'),
-  btnNew: document.getElementById('btn-new'),
-  progressFill: document.getElementById('progress-fill'),
-  questionCounter: document.getElementById('question-counter'),
-  questionScore: document.getElementById('question-score'),
-  textBaseContainer: document.getElementById('text-base-container'),
-  questionText: document.getElementById('question-text'),
-  optionsContainer: document.getElementById('options-container'),
-  unansweredCount: document.getElementById('unanswered-count'),
-  unansweredList: document.getElementById('unanswered-list'),
-  scoreSummary: document.getElementById('score-summary'),
-  resultList: document.getElementById('result-list')
-};
-
-/* =========================================================
-   MÓDULO 3 — STATUS / VALIDAÇÃO DA IMPORTAÇÃO
-   ========================================================= */
-function setStatus(el, tipo, texto) {
-  el.className = 'status ' + tipo;
-  el.textContent = texto;
+.modal-overlay.hidden {
+  display: none;
 }
-
-function atualizarStatusImportacao() {
-  const textoQ = els.inputQuestions.value;
-  const textoG = els.inputGabarito.value;
-
-  const questoes = importarQuestoes(textoQ);
-  if (!textoQ.trim()) {
-    setStatus(els.statusQuestions, 'empty', 'Nenhuma questão importada.');
-  } else if (questoes.length > 0) {
-    const comTextoBase = questoes.filter(q => q.textoBase).length;
-    setStatus(els.statusQuestions, 'ok',
-      `✓ ${questoes.length} questão(ões) detectada(s)` +
-      (comTextoBase ? ` — ${comTextoBase} com texto-base.` : '.'));
-  } else {
-    setStatus(els.statusQuestions, 'error',
-      '✗ Não foi possível identificar questões. Verifique o formato.');
-  }
-
-  const gabarito = importarGabarito(textoG);
-  const totalGab = Object.keys(gabarito).length;
-  if (!textoG.trim()) {
-    setStatus(els.statusGabarito, 'empty', 'Nenhum gabarito importado.');
-  } else if (totalGab > 0) {
-    setStatus(els.statusGabarito, 'ok', `✓ ${totalGab} resposta(s) no gabarito.`);
-  } else {
-    setStatus(els.statusGabarito, 'error',
-      '✗ Não foi possível identificar o gabarito. Verifique o formato.');
-  }
-
-  els.btnStart.disabled = !(questoes.length > 0 && totalGab > 0);
+.modal-content {
+  background: #fff;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 800px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+  animation: modalFadeIn 0.2s ease;
 }
-
-['input', 'change', 'keyup', 'paste', 'blur'].forEach(evt => {
-  els.inputQuestions.addEventListener(evt, atualizarStatusImportacao);
-  els.inputGabarito.addEventListener(evt, atualizarStatusImportacao);
-});
-
-setInterval(() => {
-  if (!els.stepImport.classList.contains('hidden')) {
-    atualizarStatusImportacao();
-  }
-}, 800);
-
-els.btnRecheck.addEventListener('click', atualizarStatusImportacao);
-
-/* =========================================================
-   MÓDULO 4 — EXEMPLO
-   ========================================================= */
-const EX_Q = `Texto-base para as questões 1 a 2:
-"A adoção de inteligência artificial em processos seletivos públicos tem crescido. Ainda que a tecnologia traga ganhos de eficiência, especialistas alertam para riscos de vieses algorítmicos, que podem reproduzir desigualdades já existentes."
-1. De acordo com o texto, é correto afirmar que: (A) A IA elimina totalmente os vieses. (B) O uso de IA tem diminuído. (C) A eficiência da IA vem acompanhada de riscos que exigem monitoramento. (D) As auditorias já eliminaram os riscos. (E) O texto defende o fim do uso de IA.
-2. A expressão "ainda que" estabelece relação de: (A) causa (B) conclusão (C) concessão (D) finalidade (E) condição
-3. Em textos técnicos institucionais (editais), predomina o tipo textual: (A) narrativo (B) descritivo (C) dissertativo-argumentativo (D) injuntivo (E) lírico`;
-
-const EX_G = `1. C — O texto afirma "ganhos de eficiência" e, ao mesmo tempo, "riscos".
-2. C — "Ainda que" introduz concessão.
-3. D — Editais estabelecem normas e instruem sobre procedimentos.`;
-
-els.btnExample.addEventListener('click', () => {
-  els.inputQuestions.value = EX_Q;
-  els.inputGabarito.value = EX_G;
-  atualizarStatusImportacao();
-});
-
-/* =========================================================
-   MÓDULO 5 — INÍCIO
-   ========================================================= */
-els.btnStart.addEventListener('click', () => {
-  state.questoes = importarQuestoes(els.inputQuestions.value);
-  state.gabarito = importarGabarito(els.inputGabarito.value);
-  state.indiceAtual = 0;
-  state.respostas = {};
-  state.acertos = 0;
-  state.acertosVisivel = true;
-  atualizarBotaoToggleScore();
-
-  if (state.questoes.length === 0) { alert('Nenhuma questão válida encontrada.'); return; }
-
-  els.stepImport.classList.add('hidden');
-  els.stepQuiz.classList.remove('hidden');
-  renderizarQuestao();
-});
-
-/* =========================================================
-   MÓDULO 6 — QUESTIONÁRIO
-   ========================================================= */
-function recalcularAcertos() {
-  let a = 0;
-  for (const q of state.questoes) {
-    const r = state.respostas[q.numero];
-    const g = state.gabarito[q.numero];
-    if (r && g && r === g.letra) a++;
-  }
-  state.acertos = a;
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
-
-function atualizarContadorAcertos() {
-  if (state.acertosVisivel) {
-    els.questionScore.textContent = `Acertos: ${state.acertos}`;
-    els.questionScore.style.visibility = 'visible';
-  } else {
-    els.questionScore.textContent = 'Acertos: •••';
-  }
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  background: #f8fafc;
+  border-radius: 12px 12px 0 0;
 }
-
-function atualizarBotaoToggleScore() {
-  if (state.acertosVisivel) {
-    els.btnToggleScore.textContent = '👁️ Ocultar';
-    els.btnToggleScore.title = 'Ocultar contador de acertos';
-  } else {
-    els.btnToggleScore.textContent = '👁️‍🗨️ Mostrar';
-    els.btnToggleScore.title = 'Mostrar contador de acertos';
-  }
+.modal-header h3 {
+  font-size: 1.1rem;
+  color: var(--primary-dark);
+  margin: 0;
 }
-
-els.btnToggleScore.addEventListener('click', () => {
-  state.acertosVisivel = !state.acertosVisivel;
-  atualizarContadorAcertos();
-  atualizarBotaoToggleScore();
-});
-
-function todasResolvidas() {
-  return state.questoes.every(q => state.respostas[q.numero]);
+.btn-close {
+  background: transparent;
+  border: none;
+  font-size: 1.8rem;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s;
 }
-
-function atualizarBotaoFinalizar() {
-  const pronto = todasResolvidas();
-  els.btnFinish.disabled = !pronto;
-  els.btnFinish.classList.toggle('ready', pronto);
+.btn-close:hover {
+  color: var(--danger);
 }
-
-function renderizarListaNaoResolvidas() {
-  const naoResolvidas = state.questoes.filter(q => !state.respostas[q.numero]);
-  els.unansweredCount.textContent = `(${naoResolvidas.length})`;
-
-  els.unansweredList.innerHTML = '';
-  if (naoResolvidas.length === 0) {
-    const p = document.createElement('div');
-    p.className = 'all-done';
-    p.textContent = '🎉 Todas as questões foram respondidas! Clique em "Finalizar ✓" para ver o resultado.';
-    els.unansweredList.appendChild(p);
-    return;
-  }
-
-  naoResolvidas.forEach(q => {
-    const btn = document.createElement('button');
-    btn.className = 'unanswered-chip';
-    btn.textContent = `Q${q.numero}`;
-    btn.title = 'Ir para esta questão';
-    btn.addEventListener('click', () => {
-      const idx = state.questoes.findIndex(x => x.numero === q.numero);
-      if (idx >= 0) {
-        state.indiceAtual = idx;
-        renderizarQuestao();
-        els.stepQuiz.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    });
-    els.unansweredList.appendChild(btn);
-  });
+.modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  font-size: 1rem;
+  color: var(--text);
+  line-height: 1.8;
+  white-space: pre-wrap; /* Preserva os parágrafos pulados */
+  text-align: justify;   /* Texto justificado */
 }
-
-function renderizarQuestao() {
-  const q = state.questoes[state.indiceAtual];
-  const total = state.questoes.length;
-
-  els.progressFill.style.width = `${((state.indiceAtual) / total) * 100}%`;
-  els.questionCounter.textContent = `Questão ${state.indiceAtual + 1} de ${total} — Q${q.numero}`;
-
-  recalcularAcertos();
-  atualizarContadorAcertos();
-
-  if (q.textoBase) {
-    els.textBaseContainer.classList.remove('hidden');
-    els.textBaseContainer.textContent = q.textoBase;
-  } else {
-    els.textBaseContainer.classList.add('hidden');
-    els.textBaseContainer.textContent = '';
-  }
-
-  els.questionText.textContent = `${q.numero}. ${q.enunciado}`;
-
-  els.optionsContainer.innerHTML = '';
-  const letras = ['A', 'B', 'C', 'D', 'E'].filter(l => q.alternativas[l]);
-  const respostaSalva = state.respostas[q.numero];
-
-  letras.forEach(letra => {
-    const div = document.createElement('div');
-    div.className = 'option' + (respostaSalva === letra ? ' selected' : '');
-    div.dataset.letra = letra;
-    div.innerHTML = `<span class="option-letter">(${letra})</span><span>${q.alternativas[letra]}</span>`;
-    div.addEventListener('click', () => selecionarAlternativa(letra));
-    els.optionsContainer.appendChild(div);
-  });
-
-  els.btnPrev.disabled = state.indiceAtual === 0;
-  els.btnNext.disabled = state.indiceAtual === total - 1;
-  atualizarBotaoFinalizar();
-  renderizarListaNaoResolvidas();
+.modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  text-align: right;
+  background: #f8fafc;
+  border-radius: 0 0 12px 12px;
 }
-
-function selecionarAlternativa(letra) {
-  const q = state.questoes[state.indiceAtual];
-  state.respostas[q.numero] = letra;
-  recalcularAcertos();
-  atualizarContadorAcertos();
-
-  document.querySelectorAll('.option').forEach(el => {
-    el.classList.toggle('selected', el.dataset.letra === letra);
-  });
-
-  renderizarListaNaoResolvidas();
-  atualizarBotaoFinalizar();
-}
-
-els.btnNext.addEventListener('click', () => {
-  if (state.indiceAtual < state.questoes.length - 1) {
-    state.indiceAtual++;
-    renderizarQuestao();
-  }
-});
-
-els.btnPrev.addEventListener('click', () => {
-  if (state.indiceAtual > 0) {
-    state.indiceAtual--;
-    renderizarQuestao();
-  }
-});
-
-els.btnFinish.addEventListener('click', () => {
-  if (!todasResolvidas()) {
-    alert('Responda todas as questões antes de finalizar.');
-    return;
-  }
-  mostrarResultado();
-});
-
-els.btnQuit.addEventListener('click', () => {
-  if (confirm('Deseja sair? Seu progresso será perdido.')) resetarApp();
-});
-
-/* =========================================================
-   MÓDULO 7 — RESULTADO
-   ========================================================= */
-function mostrarResultado() {
-  els.stepQuiz.classList.add('hidden');
-  els.stepResult.classList.remove('hidden');
-
-  recalcularAcertos();
-  const total = state.questoes.length;
-  const acertos = state.acertos;
-  const erros = total - acertos;
-  const percentual = Math.round((acertos / total) * 100);
-
-  els.scoreSummary.innerHTML = `
-    <div class="score-box correct"><span class="num">${acertos}</span><span class="label">Acertos</span></div>
-    <div class="score-box wrong"><span class="num">${erros}</span><span class="label">Erros</span></div>
-    <div class="score-box percent"><span class="num">${percentual}%</span><span class="label">Aproveitamento</span></div>
-  `;
-
-  els.resultList.innerHTML = '';
-  state.questoes.forEach(q => {
-    const gab = state.gabarito[q.numero];
-    const resposta = state.respostas[q.numero];
-    const acertou = gab && resposta === gab.letra;
-
-    const item = document.createElement('div');
-    item.className = 'result-item' + (acertou ? '' : ' incorrect');
-
-    const letras = ['A', 'B', 'C', 'D', 'E'].filter(l => q.alternativas[l]);
-    const opcoesHtml = letras.map(letra => {
-      let cls = 'opt';
-      if (gab && gab.letra === letra) cls += ' correct';
-      if (resposta === letra && (!gab || gab.letra !== letra)) cls += ' wrong';
-      return `<div class="${cls}">(${letra}) ${q.alternativas[letra]}</div>`;
-    }).join('');
-
-    const comentarioHtml = gab
-      ? `<div class="comment"><strong>Gabarito:</strong> (${gab.letra}) — ${gab.comentario}</div>`
-      : `<div class="comment"><em>Sem comentário disponível.</em></div>`;
-
-    item.innerHTML = `
-      <h3>
-        <span class="badge ${acertou ? 'ok' : 'no'}">${acertou ? 'Acertou' : 'Errou'}</span>
-        <span>Questão ${q.numero} — Sua resposta: (${resposta || '—'})</span>
-      </h3>
-      <div style="font-size:.92rem;margin-bottom:8px;white-space:pre-line">${q.enunciado}</div>
-      <div class="result-options">${opcoesHtml}</div>
-      ${comentarioHtml}
-    `;
-    els.resultList.appendChild(item);
-  });
-}
-
-/* =========================================================
-   MÓDULO 8 — RESET
-   ========================================================= */
-els.btnRestart.addEventListener('click', () => {
-  state.indiceAtual = 0;
-  state.respostas = {};
-  state.acertos = 0;
-  state.acertosVisivel = true;
-  atualizarBotaoToggleScore();
-  els.stepResult.classList.add('hidden');
-  els.stepQuiz.classList.remove('hidden');
-  renderizarQuestao();
-});
-
-els.btnNew.addEventListener('click', resetarApp);
-
-function resetarApp() {
-  state.questoes = []; state.gabarito = {};
-  state.indiceAtual = 0; state.respostas = {}; state.acertos = 0;
-  state.acertosVisivel = true;
-  atualizarBotaoToggleScore();
-  els.stepQuiz.classList.add('hidden');
-  els.stepResult.classList.add('hidden');
-  els.stepImport.classList.remove('hidden');
-  els.inputQuestions.value = '';
-  els.inputGabarito.value = '';
-  atualizarStatusImportacao();
-}
-
-/* Init */
-atualizarStatusImportacao();
-atualizarBotaoToggleScore();
