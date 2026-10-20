@@ -12,52 +12,49 @@ function importarQuestoes(texto) {
   const reRotulo = /^\s*Quest[õo]es\s+\d+\s+a\s+\d+\s*(?:\(.*?\))?\s*:?\s*$/i;
   const reSeparador = /^\s*[_\-–—=]{3,}\s*$/;
 
-  /* PASSO 1: mapear textos-base por intervalo (suporta vários formatos) */
+  // Função auxiliar para detectar se uma linha é um cabeçalho de texto-base
+  const getCabecalhoTexto = (txt) => {
+    const m = txt.match(/(?:quest[õo]es?|questions?)(?:\s+de\s+n[úu]meros?)?\s+(\d+)(?:\s*(?:a|até|à|to|–|-|—)\s*(\d+))?/i);
+    if (m && /texto|trecho|considere|atenção|leia|text\b|read\b|responda|answer/i.test(txt)) {
+      return { de: parseInt(m[1], 10), ate: m[2] ? parseInt(m[2], 10) : parseInt(m[1], 10) };
+    }
+    return null;
+  };
+
+  /* PASSO 1: mapear textos-base por intervalo */
   for (let i = 0; i < linhas.length; i++) {
     const t = linhas[i].trim();
     if (!t || reQuestao.test(t)) continue;
 
-    // Verifica se a linha contém menção a "questões X a Y" ou "questions X to Y"
-    const m = t.match(/(?:quest[õo]es?|questions?)(?:\s+de\s+n[úu]meros?)?\s+(\d+)(?:\s*(?:a|até|à|to|–|-|—)\s*(\d+))?/i);
-    
-    if (m) {
-      // Confirma se é um cabeçalho (evita pegar questões que mencionam "questões 1 a 5" no enunciado)
-      const isCabecalho = /texto|trecho|considere|atenção|leia|text\b|read\b|responda|answer/i.test(t);
+    const cab = getCabecalhoTexto(t);
+    if (cab) {
+      const { de, ate } = cab;
+      let conteudoLinhas = [];
+      let j = i;
       
-      if (isCabecalho) {
-        const de = parseInt(m[1], 10);
-        const ate = m[2] ? parseInt(m[2], 10) : de;
+      // Acumula as linhas do texto até encontrar a próxima questão ou outro texto-base
+      while (j < linhas.length) {
+        const nt = linhas[j].trim();
+        if (j > i && reQuestao.test(nt)) break;
+        if (j > i && getCabecalhoTexto(nt)) break;
         
-        let conteudoLinhas = [];
-        let j = i;
-        
-        // Acumula as linhas do texto até encontrar a próxima questão
-        while (j < linhas.length) {
-          const nt = linhas[j].trim();
-          if (j > i && reQuestao.test(nt)) break;
-          
-          // Se encontrar outro cabeçalho de texto, para
-          if (j > i && nt.match(/(?:quest[õo]es?|questions?)(?:\s+de\s+n[úu]meros?)?\s+(\d+)(?:\s*(?:a|até|à|to|–|-|—)\s*(\d+))?/i) && /texto|trecho|considere|atenção|leia|text\b|read\b|responda|answer/i.test(nt)) break;
-          
-          if (nt) conteudoLinhas.push(nt);
-          j++;
-        }
-        
-        let conteudo = conteudoLinhas.join(' ');
-        
-        // Limpeza do cabeçalho para manter apenas o texto em si
-        conteudo = conteudo.replace(/^Atenção:.*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
-        conteudo = conteudo.replace(/^Para responder.*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
-        conteudo = conteudo.replace(/^.*?quest[õo]es?\s+(\d+)(?:\s*a\s*(\d+))?\s*:\s*/i, '');
-        conteudo = conteudo.replace(/^.*?questions?\s+(\d+)(?:\s*to\s*(\d+))?\s*:\s*/i, '');
-        conteudo = conteudo.replace(/^["“”'‘’]+/, '').replace(/["“”'‘’]+$/, '').trim();
-        
-        if (conteudo) {
-          for (let n = de; n <= ate; n++) textosBase[n] = conteudo;
-        }
-        
-        i = j - 1;
+        if (nt) conteudoLinhas.push(nt);
+        j++;
       }
+      
+      let conteudo = conteudoLinhas.join(' ');
+      
+      // Limpeza do cabeçalho para manter apenas o texto em si
+      conteudo = conteudo.replace(/^Atenção:.*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
+      conteudo = conteudo.replace(/^Para responder.*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
+      conteudo = conteudo.replace(/^.*?quest[õo]es?\s+(\d+)(?:\s*a\s*(\d+))?\s*:\s*/i, '');
+      conteudo = conteudo.replace(/^.*?questions?\s+(\d+)(?:\s*to\s*(\d+))?\s*:\s*/i, '');
+      conteudo = conteudo.replace(/^["“”'‘’]+/, '').replace(/["“”'‘’]+$/, '').trim();
+      
+      if (conteudo) {
+        for (let n = de; n <= ate; n++) textosBase[n] = conteudo;
+      }
+      i = j - 1;
     }
   }
 
@@ -66,10 +63,7 @@ function importarQuestoes(texto) {
   while (i < linhas.length) {
     const t = linhas[i].trim();
 
-    if (!t ||
-        reModulo.test(t) ||
-        reRotulo.test(t) ||
-        reSeparador.test(t)) {
+    if (!t || reModulo.test(t) || reRotulo.test(t) || reSeparador.test(t)) {
       i++; continue;
     }
 
@@ -79,13 +73,14 @@ function importarQuestoes(texto) {
     const numero = parseInt(m[1], 10);
     let bloco = m[2];
 
-    // Acumula todas as linhas seguintes até encontrar a próxima questão
+    // Acumula todas as linhas seguintes até encontrar a próxima questão ou um novo texto-base
     let j = i + 1;
     while (j < linhas.length) {
       const nt = linhas[j].trim();
       if (!nt) { bloco += '\n'; j++; continue; }
-      if (reModulo.test(nt)) break;
-      if (reQuestao.test(nt)) break;
+      
+      // Para se encontrar um novo módulo, nova questão ou um novo texto-base
+      if (reModulo.test(nt) || reQuestao.test(nt) || getCabecalhoTexto(nt)) break;
 
       bloco += '\n' + nt;
       j++;
