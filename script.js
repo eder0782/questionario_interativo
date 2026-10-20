@@ -5,7 +5,7 @@ function importarQuestoes(texto) {
   if (!texto || !texto.trim()) return [];
   const linhas = texto.replace(/\r\n/g, '\n').split('\n');
   const questoes = [];
-  const textosBaseInfo = {}; // numero -> { de, ate, texto }
+  const textosBase = {};
 
   const reQuestao = /^\s*(\d+)\s*[\.\)]\s*(.*)$/;
   const reModulo = /^\s*(?:[📝📌🔹📘📗📕🎯💡✨]\s*)*M[ÓO]DULO\b/i;
@@ -32,35 +32,33 @@ function importarQuestoes(texto) {
       let conteudoLinhas = [];
       let j = i;
       
+      // Acumula as linhas do texto até encontrar a próxima questão ou outro texto-base
       while (j < linhas.length) {
         const nt = linhas[j].trim();
         if (j > i && reQuestao.test(nt)) break;
         if (j > i && getCabecalhoTexto(nt)) break;
         
-        conteudoLinhas.push(nt);
+        if (nt) conteudoLinhas.push(nt);
         j++;
       }
       
-      let conteudo = conteudoLinhas.join('\n');
+      let conteudo = conteudoLinhas.join(' ');
       
       // Limpeza do cabeçalho para manter apenas o texto em si
-      conteudo = conteudo.replace(/^Atenção:[\s\S]*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
-      conteudo = conteudo.replace(/^Para responder[\s\S]*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
-      conteudo = conteudo.replace(/^.*?quest[õo]es?\s+(\d+)(?:\s*a\s*(\d+))?[\s\S]*?:\s*/i, '');
-      conteudo = conteudo.replace(/^.*?questions?\s+(\d+)(?:\s*to\s*(\d+))?[\s\S]*?:\s*/i, '');
+      conteudo = conteudo.replace(/^Atenção:.*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
+      conteudo = conteudo.replace(/^Para responder.*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
+      conteudo = conteudo.replace(/^.*?quest[õo]es?\s+(\d+)(?:\s*a\s*(\d+))?\s*:\s*/i, '');
+      conteudo = conteudo.replace(/^.*?questions?\s+(\d+)(?:\s*to\s*(\d+))?\s*:\s*/i, '');
       conteudo = conteudo.replace(/^["“”'‘’]+/, '').replace(/["“”'‘’]+$/, '').trim();
-      conteudo = conteudo.replace(/\n{3,}/g, '\n\n'); // Normaliza múltiplos parágrafos
       
       if (conteudo) {
-        for (let n = de; n <= ate; n++) {
-          textosBaseInfo[n] = { de, ate, texto: conteudo };
-        }
+        for (let n = de; n <= ate; n++) textosBase[n] = conteudo;
       }
       i = j - 1;
     }
   }
 
-  /* PASSO 2: extrair questões */
+  /* PASSO 2: extrair questões (suporte robusto a multilinhas) */
   let i = 0;
   while (i < linhas.length) {
     const t = linhas[i].trim();
@@ -75,10 +73,13 @@ function importarQuestoes(texto) {
     const numero = parseInt(m[1], 10);
     let bloco = m[2];
 
+    // Acumula todas as linhas seguintes até encontrar a próxima questão ou um novo texto-base
     let j = i + 1;
     while (j < linhas.length) {
       const nt = linhas[j].trim();
       if (!nt) { bloco += '\n'; j++; continue; }
+      
+      // Para se encontrar um novo módulo, nova questão ou um novo texto-base
       if (reModulo.test(nt) || reQuestao.test(nt) || getCabecalhoTexto(nt)) break;
 
       bloco += '\n' + nt;
@@ -86,6 +87,7 @@ function importarQuestoes(texto) {
     }
     i = j;
 
+    // Extrai as alternativas
     const blocoLinear = bloco.replace(/\n+/g, ' ').trim();
     const alternativas = {};
     const reAlt = /\(([A-E])\)\s*(.*?)(?=\s*\([A-E]\)|$)/g;
@@ -96,6 +98,7 @@ function importarQuestoes(texto) {
     }
     if (Object.keys(alternativas).length === 0) continue;
 
+    // Extrai o enunciado
     const idxAlt = bloco.search(/\([A-E]\)/);
     const enunciadoRaw = idxAlt >= 0 ? bloco.slice(0, idxAlt) : bloco;
     const enunciado = enunciadoRaw
@@ -108,7 +111,7 @@ function importarQuestoes(texto) {
       numero,
       enunciado,
       alternativas,
-      textoBase: textosBaseInfo[numero] || null
+      textoBase: textosBase[numero] || null
     });
   }
 
@@ -353,28 +356,12 @@ function renderizarQuestao() {
   recalcularAcertos();
   atualizarContadorAcertos();
 
-  // Lógica do Texto-Base (Aviso e Botão para abrir popup)
   if (q.textoBase) {
     els.textBaseContainer.classList.remove('hidden');
-    els.textBaseContainer.innerHTML = `
-      <div>
-        📖 Texto para responder às questões de número <strong>${q.textoBase.de} a ${q.textoBase.ate}</strong>
-      </div>
-      <button class="btn-primary" id="btn-show-text" style="padding: 8px 16px; font-size: 0.85rem;">Mostrar Texto</button>
-    `;
-    
-    // Adiciona o evento de clique para abrir o modal com o texto
-    const btnShow = document.getElementById('btn-show-text');
-    if (btnShow) {
-      btnShow.addEventListener('click', () => {
-        document.getElementById('modal-text-title').textContent = `Texto (Questões ${q.textoBase.de} a ${q.textoBase.ate})`;
-        document.getElementById('modal-text-body').textContent = q.textoBase.texto;
-        document.getElementById('text-modal').classList.remove('hidden');
-      });
-    }
+    els.textBaseContainer.textContent = q.textoBase;
   } else {
     els.textBaseContainer.classList.add('hidden');
-    els.textBaseContainer.innerHTML = '';
+    els.textBaseContainer.textContent = '';
   }
 
   els.questionText.textContent = `${q.numero}. ${q.enunciado}`;
@@ -492,7 +479,7 @@ function mostrarResultado() {
 }
 
 /* =========================================================
-   MÓDULO 8 — RESET E MODAL
+   MÓDULO 8 — RESET
    ========================================================= */
 els.btnRestart.addEventListener('click', () => {
   state.indiceAtual = 0;
@@ -519,27 +506,6 @@ function resetarApp() {
   els.inputGabarito.value = '';
   atualizarStatusImportacao();
 }
-
-// --- CONTROLE DO MODAL (POPUP) ---
-function fecharModal() {
-  document.getElementById('text-modal').classList.add('hidden');
-}
-
-document.getElementById('btn-close-modal').addEventListener('click', fecharModal);
-document.getElementById('btn-close-modal-footer').addEventListener('click', fecharModal);
-
-// Fecha o modal ao clicar fora da caixa branca
-document.getElementById('text-modal').addEventListener('click', (e) => {
-  if (e.target.id === 'text-modal') fecharModal();
-});
-
-// Fecha o modal com a tecla Esc
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    const modal = document.getElementById('text-modal');
-    if (!modal.classList.contains('hidden')) fecharModal();
-  }
-});
 
 /* Init */
 atualizarStatusImportacao();
