@@ -5,7 +5,7 @@ function importarQuestoes(texto) {
   if (!texto || !texto.trim()) return [];
   const linhas = texto.replace(/\r\n/g, '\n').split('\n');
   const questoes = [];
-  const textosBase = {};
+  const textosBaseInfo = {}; // numero -> { de, ate, texto }
 
   const reQuestao = /^\s*(\d+)\s*[\.\)]\s*(.*)$/;
   const reModulo = /^\s*(?:[📝📌🔹📘📗📕🎯💡✨]\s*)*M[ÓO]DULO\b/i;
@@ -32,33 +32,65 @@ function importarQuestoes(texto) {
       let conteudoLinhas = [];
       let j = i;
       
-      // Acumula as linhas do texto até encontrar a próxima questão ou outro texto-base
       while (j < linhas.length) {
         const nt = linhas[j].trim();
         if (j > i && reQuestao.test(nt)) break;
         if (j > i && getCabecalhoTexto(nt)) break;
         
-        if (nt) conteudoLinhas.push(nt);
+        conteudoLinhas.push(nt);
         j++;
       }
       
-      let conteudo = conteudoLinhas.join(' ');
+      let rawText = conteudoLinhas.join('\n');
       
       // Limpeza do cabeçalho para manter apenas o texto em si
-      conteudo = conteudo.replace(/^Atenção:.*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
-      conteudo = conteudo.replace(/^Para responder.*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
-      conteudo = conteudo.replace(/^.*?quest[õo]es?\s+(\d+)(?:\s*a\s*(\d+))?\s*:\s*/i, '');
-      conteudo = conteudo.replace(/^.*?questions?\s+(\d+)(?:\s*to\s*(\d+))?\s*:\s*/i, '');
-      conteudo = conteudo.replace(/^["“”'‘’]+/, '').replace(/["“”'‘’]+$/, '').trim();
+      rawText = rawText.replace(/^Atenção:[\s\S]*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
+      rawText = rawText.replace(/^Para responder[\s\S]*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
+      rawText = rawText.replace(/^.*?quest[õo]es?\s+(\d+)(?:\s*a\s*(\d+))?[\s\S]*?:\s*/i, '');
+      rawText = rawText.replace(/^.*?questions?\s+(\d+)(?:\s*to\s*(\d+))?[\s\S]*?:\s*/i, '');
+      rawText = rawText.replace(/^["“”'‘’]+/, '').replace(/["“”'‘’]+$/, '').trim();
       
-      if (conteudo) {
-        for (let n = de; n <= ate; n++) textosBase[n] = conteudo;
+      // Algoritmo inteligente para separar parágrafos reais de quebras falsas de PDF
+      let paragrafos = [];
+      let atual = "";
+      let linhasTexto = rawText.split('\n');
+      
+      for (let k = 0; k < linhasTexto.length; k++) {
+          let linha = linhasTexto[k].trim();
+          if (!linha) {
+              if (atual) { paragrafos.push(atual); atual = ""; }
+              continue;
+          }
+          
+          if (atual === "") {
+              atual = linha;
+          } else {
+              let terminaPontuacao = /[.!?:;]$/.test(atual);
+              let comecaMaiuscula = /^[A-ZÀ-Ú"“]/.test(linha);
+              let anteriorCurta = atual.length < 50 && !terminaPontuacao;
+              
+              if ((terminaPontuacao && comecaMaiuscula) || anteriorCurta) {
+                  paragrafos.push(atual);
+                  atual = linha;
+              } else {
+                  atual += " " + linha;
+              }
+          }
+      }
+      if (atual) paragrafos.push(atual);
+      
+      let conteudoFormatado = paragrafos.join('\n\n');
+      
+      if (conteudoFormatado) {
+        for (let n = de; n <= ate; n++) {
+          textosBaseInfo[n] = { de, ate, texto: conteudoFormatado };
+        }
       }
       i = j - 1;
     }
   }
 
-  /* PASSO 2: extrair questões (suporte robusto a multilinhas) */
+  /* PASSO 2: extrair questões */
   let i = 0;
   while (i < linhas.length) {
     const t = linhas[i].trim();
@@ -73,13 +105,10 @@ function importarQuestoes(texto) {
     const numero = parseInt(m[1], 10);
     let bloco = m[2];
 
-    // Acumula todas as linhas seguintes até encontrar a próxima questão ou um novo texto-base
     let j = i + 1;
     while (j < linhas.length) {
       const nt = linhas[j].trim();
       if (!nt) { bloco += '\n'; j++; continue; }
-      
-      // Para se encontrar um novo módulo, nova questão ou um novo texto-base
       if (reModulo.test(nt) || reQuestao.test(nt) || getCabecalhoTexto(nt)) break;
 
       bloco += '\n' + nt;
@@ -87,7 +116,6 @@ function importarQuestoes(texto) {
     }
     i = j;
 
-    // Extrai as alternativas
     const blocoLinear = bloco.replace(/\n+/g, ' ').trim();
     const alternativas = {};
     const reAlt = /\(([A-E])\)\s*(.*?)(?=\s*\([A-E]\)|$)/g;
@@ -98,20 +126,22 @@ function importarQuestoes(texto) {
     }
     if (Object.keys(alternativas).length === 0) continue;
 
-    // Extrai o enunciado
     const idxAlt = bloco.search(/\([A-E]\)/);
     const enunciadoRaw = idxAlt >= 0 ? bloco.slice(0, idxAlt) : bloco;
+    
+    // CORREÇÃO: Junta as linhas do enunciado (remove quebras falsas do PDF)
+    // Mantém quebras duplas caso existam (para matrizes ou listas)
     const enunciado = enunciadoRaw
-      .split('\n')
-      .map(l => l.trim())
-      .filter(Boolean)
-      .join('\n');
+      .split('\n\n')
+      .map(p => p.split('\n').map(l => l.trim()).filter(Boolean).join(' '))
+      .join('\n\n')
+      .trim();
 
     questoes.push({
       numero,
       enunciado,
       alternativas,
-      textoBase: textosBase[numero] || null
+      textoBase: textosBaseInfo[numero] || null
     });
   }
 
@@ -356,12 +386,35 @@ function renderizarQuestao() {
   recalcularAcertos();
   atualizarContadorAcertos();
 
+  // Lógica do Texto-Base (Aviso e Botão para abrir popup)
   if (q.textoBase) {
     els.textBaseContainer.classList.remove('hidden');
-    els.textBaseContainer.textContent = q.textoBase;
+    els.textBaseContainer.innerHTML = `
+      <div>
+        📖 Texto para responder às questões de número <strong>${q.textoBase.de} a ${q.textoBase.ate}</strong>
+      </div>
+      <button class="btn-primary" id="btn-show-text" style="padding: 8px 16px; font-size: 0.85rem;">Mostrar Texto</button>
+    `;
+    
+    // Adiciona o evento de clique para abrir o modal com o texto
+    const btnShow = document.getElementById('btn-show-text');
+    if (btnShow) {
+      btnShow.addEventListener('click', () => {
+        document.getElementById('modal-text-title').textContent = `Texto (Questões ${q.textoBase.de} a ${q.textoBase.ate})`;
+        
+        // Transforma as quebras de parágrafo (\n\n) em tags <p> para o HTML
+        const formattedHTML = q.textoBase.texto
+            .split('\n\n')
+            .map(para => `<p>${para}</p>`)
+            .join('');
+            
+        document.getElementById('modal-text-body').innerHTML = formattedHTML;
+        document.getElementById('text-modal').classList.remove('hidden');
+      });
+    }
   } else {
     els.textBaseContainer.classList.add('hidden');
-    els.textBaseContainer.textContent = '';
+    els.textBaseContainer.innerHTML = '';
   }
 
   els.questionText.textContent = `${q.numero}. ${q.enunciado}`;
@@ -479,7 +532,7 @@ function mostrarResultado() {
 }
 
 /* =========================================================
-   MÓDULO 8 — RESET
+   MÓDULO 8 — RESET E MODAL
    ========================================================= */
 els.btnRestart.addEventListener('click', () => {
   state.indiceAtual = 0;
@@ -506,6 +559,27 @@ function resetarApp() {
   els.inputGabarito.value = '';
   atualizarStatusImportacao();
 }
+
+// --- CONTROLE DO MODAL (POPUP) ---
+function fecharModal() {
+  document.getElementById('text-modal').classList.add('hidden');
+}
+
+document.getElementById('btn-close-modal').addEventListener('click', fecharModal);
+document.getElementById('btn-close-modal-footer').addEventListener('click', fecharModal);
+
+// Fecha o modal ao clicar fora da caixa branca
+document.getElementById('text-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'text-modal') fecharModal();
+});
+
+// Fecha o modal com a tecla Esc
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const modal = document.getElementById('text-modal');
+    if (!modal.classList.contains('hidden')) fecharModal();
+  }
+});
 
 /* Init */
 atualizarStatusImportacao();
