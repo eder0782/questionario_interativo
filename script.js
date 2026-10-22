@@ -5,14 +5,13 @@ function importarQuestoes(texto) {
   if (!texto || !texto.trim()) return [];
   const linhas = texto.replace(/\r\n/g, '\n').split('\n');
   const questoes = [];
-  const textosBaseInfo = {}; // numero -> { de, ate, texto }
+  const textosBaseInfo = {}; 
 
   const reQuestao = /^\s*(\d+)\s*[\.\)]\s*(.*)$/;
   const reModulo = /^\s*(?:[📝📌🔹📘📗📕🎯💡✨]\s*)*M[ÓO]DULO\b/i;
   const reRotulo = /^\s*Quest[õo]es\s+\d+\s+a\s+\d+\s*(?:\(.*?\))?\s*:?\s*$/i;
   const reSeparador = /^\s*[_\-–—=]{3,}\s*$/;
 
-  // Função auxiliar para detectar se uma linha é um cabeçalho de texto-base
   const getCabecalhoTexto = (txt) => {
     const m = txt.match(/(?:quest[õo]es?|questions?)(?:\s+de\s+n[úu]meros?)?\s+(\d+)(?:\s*(?:a|até|à|to|–|-|—)\s*(\d+))?/i);
     if (m && /texto|trecho|considere|atenção|leia|text\b|read\b|responda|answer/i.test(txt)) {
@@ -21,7 +20,6 @@ function importarQuestoes(texto) {
     return null;
   };
 
-  /* PASSO 1: mapear textos-base por intervalo */
   for (let i = 0; i < linhas.length; i++) {
     const t = linhas[i].trim();
     if (!t || reQuestao.test(t)) continue;
@@ -43,14 +41,12 @@ function importarQuestoes(texto) {
       
       let rawText = conteudoLinhas.join('\n');
       
-      // Limpeza do cabeçalho para manter apenas o texto em si
       rawText = rawText.replace(/^Atenção:[\s\S]*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
       rawText = rawText.replace(/^Para responder[\s\S]*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
       rawText = rawText.replace(/^.*?quest[õo]es?\s+(\d+)(?:\s*a\s*(\d+))?[\s\S]*?:\s*/i, '');
       rawText = rawText.replace(/^.*?questions?\s+(\d+)(?:\s*to\s*(\d+))?[\s\S]*?:\s*/i, '');
       rawText = rawText.replace(/^["“”'‘’]+/, '').replace(/["“”'‘’]+$/, '').trim();
       
-      // Algoritmo inteligente para separar parágrafos reais de quebras falsas de PDF
       let paragrafos = [];
       let atual = "";
       let linhasTexto = rawText.split('\n');
@@ -90,7 +86,6 @@ function importarQuestoes(texto) {
     }
   }
 
-  /* PASSO 2: extrair questões */
   let i = 0;
   while (i < linhas.length) {
     const t = linhas[i].trim();
@@ -129,8 +124,6 @@ function importarQuestoes(texto) {
     const idxAlt = bloco.search(/\([A-E]\)/);
     const enunciadoRaw = idxAlt >= 0 ? bloco.slice(0, idxAlt) : bloco;
     
-    // CORREÇÃO: Junta as linhas do enunciado (remove quebras falsas do PDF)
-    // Mantém quebras duplas caso existam (para matrizes ou listas)
     const enunciado = enunciadoRaw
       .split('\n\n')
       .map(p => p.split('\n').map(l => l.trim()).filter(Boolean).join(' '))
@@ -196,6 +189,7 @@ const els = {
   btnToggleScore: document.getElementById('btn-toggle-score'),
   btnRestart: document.getElementById('btn-restart'),
   btnNew: document.getElementById('btn-new'),
+  btnCopyResult: document.getElementById('btn-copy-result'), // Novo elemento
   progressFill: document.getElementById('progress-fill'),
   questionCounter: document.getElementById('question-counter'),
   questionScore: document.getElementById('question-score'),
@@ -386,7 +380,6 @@ function renderizarQuestao() {
   recalcularAcertos();
   atualizarContadorAcertos();
 
-  // Lógica do Texto-Base (Aviso e Botão para abrir popup)
   if (q.textoBase) {
     els.textBaseContainer.classList.remove('hidden');
     els.textBaseContainer.innerHTML = `
@@ -396,18 +389,14 @@ function renderizarQuestao() {
       <button class="btn-primary" id="btn-show-text" style="padding: 8px 16px; font-size: 0.85rem;">Mostrar Texto</button>
     `;
     
-    // Adiciona o evento de clique para abrir o modal com o texto
     const btnShow = document.getElementById('btn-show-text');
     if (btnShow) {
       btnShow.addEventListener('click', () => {
         document.getElementById('modal-text-title').textContent = `Texto (Questões ${q.textoBase.de} a ${q.textoBase.ate})`;
-        
-        // Transforma as quebras de parágrafo (\n\n) em tags <p> para o HTML
         const formattedHTML = q.textoBase.texto
             .split('\n\n')
             .map(para => `<p>${para}</p>`)
             .join('');
-            
         document.getElementById('modal-text-body').innerHTML = formattedHTML;
         document.getElementById('text-modal').classList.remove('hidden');
       });
@@ -531,6 +520,48 @@ function mostrarResultado() {
   });
 }
 
+// Lógica para copiar o gabarito formatado para a área de transferência
+els.btnCopyResult.addEventListener('click', () => {
+  let texto = "=== GABARITO COMENTADO ===\n\n";
+  
+  state.questoes.forEach(q => {
+    const gab = state.gabarito[q.numero];
+    const resposta = state.respostas[q.numero];
+    const acertou = gab && resposta === gab.letra;
+    
+    texto += `Questão ${q.numero} - Sua resposta: (${resposta || '—'}) [${acertou ? 'ACERTOU' : 'ERROU'}]\n`;
+    texto += `${q.enunciado}\n\n`;
+    
+    const letras = ['A', 'B', 'C', 'D', 'E'].filter(l => q.alternativas[l]);
+    letras.forEach(letra => {
+      texto += `(${letra}) ${q.alternativas[letra]}\n`;
+    });
+    
+    texto += `\n`;
+    if (gab) {
+      texto += `Gabarito: (${gab.letra}) — ${gab.comentario}\n`;
+    } else {
+      texto += `Gabarito: Sem comentário disponível.\n`;
+    }
+    texto += "----------------------------------------\n\n";
+  });
+  
+  navigator.clipboard.writeText(texto).then(() => {
+    const originalText = els.btnCopyResult.innerHTML;
+    els.btnCopyResult.innerHTML = '✅ Copiado!';
+    els.btnCopyResult.style.color = 'var(--success)';
+    els.btnCopyResult.style.borderColor = 'var(--success)';
+    setTimeout(() => {
+      els.btnCopyResult.innerHTML = originalText;
+      els.btnCopyResult.style.color = '';
+      els.btnCopyResult.style.borderColor = '';
+    }, 2000);
+  }).catch(err => {
+    console.error('Erro ao copiar: ', err);
+    alert('Não foi possível copiar. Seu navegador pode não suportar esta função.');
+  });
+});
+
 /* =========================================================
    MÓDULO 8 — RESET E MODAL
    ========================================================= */
@@ -568,12 +599,10 @@ function fecharModal() {
 document.getElementById('btn-close-modal').addEventListener('click', fecharModal);
 document.getElementById('btn-close-modal-footer').addEventListener('click', fecharModal);
 
-// Fecha o modal ao clicar fora da caixa branca
 document.getElementById('text-modal').addEventListener('click', (e) => {
   if (e.target.id === 'text-modal') fecharModal();
 });
 
-// Fecha o modal com a tecla Esc
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     const modal = document.getElementById('text-modal');
