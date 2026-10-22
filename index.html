@@ -76,9 +76,13 @@
     <div class="card">
       <h2 style="margin-bottom:16px">Resultado Final</h2>
       <div class="score-summary" id="score-summary"></div>
+      <!-- Modificação aqui: Adicionado o botão de copiar -->
       <div class="actions">
-        <button class="btn-secondary" id="btn-restart">Refazer</button>
-        <button class="btn-primary" id="btn-new">Novo Simulado</button>
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <button class="btn-secondary" id="btn-restart">Refazer</button>
+          <button class="btn-primary" id="btn-new">Novo Simulado</button>
+        </div>
+        <button class="btn-secondary" id="btn-copy-result" title="Copiar Gabarito Comentado">📋 Copiar Gabarito</button>
       </div>
     </div>
     <div class="card">
