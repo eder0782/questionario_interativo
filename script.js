@@ -1,615 +1,1128 @@
 /* =========================================================
-   MÓDULO 1 — PARSER
+   Simulado Interativo — script.js (interface)
+   Depende de: parser.js (SimuladoParser) e storage.js (SimuladoStorage)
    ========================================================= */
-function importarQuestoes(texto) {
-  if (!texto || !texto.trim()) return [];
-  const linhas = texto.replace(/\r\n/g, '\n').split('\n');
-  const questoes = [];
-  const textosBaseInfo = {}; 
+(function () {
+  'use strict';
 
-  const reQuestao = /^\s*(\d+)\s*[\.\)]\s*(.*)$/;
-  const reModulo = /^\s*(?:[📝📌🔹📘📗📕🎯💡✨]\s*)*M[ÓO]DULO\b/i;
-  const reRotulo = /^\s*Quest[õo]es\s+\d+\s+a\s+\d+\s*(?:\(.*?\))?\s*:?\s*$/i;
-  const reSeparador = /^\s*[_\-–—=]{3,}\s*$/;
+  const P = window.SimuladoParser;
+  const { Repositorio: Repo, LocalStorageAdapter } = window.SimuladoStorage;
 
-  const getCabecalhoTexto = (txt) => {
-    const m = txt.match(/(?:quest[õo]es?|questions?)(?:\s+de\s+n[úu]meros?)?\s+(\d+)(?:\s*(?:a|até|à|to|–|-|—)\s*(\d+))?/i);
-    if (m && /texto|trecho|considere|atenção|leia|text\b|read\b|responda|answer/i.test(txt)) {
-      return { de: parseInt(m[1], 10), ate: m[2] ? parseInt(m[2], 10) : parseInt(m[1], 10) };
+  /* =========================================================
+     MÓDULO 1 — UTILIDADES
+     ========================================================= */
+  const $ = id => document.getElementById(id);
+  const LETRAS = 'ABCDE';
+
+  // Escapa HTML: texto como "<script>" ou "x < y" aparece literalmente
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  const uid = () => (window.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + Math.random().toString(36).slice(2);
+
+  const clonar = obj => JSON.parse(JSON.stringify(obj));
+
+  const embaralhar = arr => {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
     }
-    return null;
+    return a;
   };
 
-  for (let i = 0; i < linhas.length; i++) {
-    const t = linhas[i].trim();
-    if (!t || reQuestao.test(t)) continue;
+  const fmtTempo = seg => {
+    seg = Math.max(0, Math.floor(seg || 0));
+    const h = Math.floor(seg / 3600), m = Math.floor(seg % 3600 / 60), s = seg % 60;
+    const mm = String(m).padStart(2, '0'), ss = String(s).padStart(2, '0');
+    return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  };
 
-    const cab = getCabecalhoTexto(t);
-    if (cab) {
-      const { de, ate } = cab;
-      let conteudoLinhas = [];
-      let j = i;
-      
-      while (j < linhas.length) {
-        const nt = linhas[j].trim();
-        if (j > i && reQuestao.test(nt)) break;
-        if (j > i && getCabecalhoTexto(nt)) break;
-        
-        conteudoLinhas.push(nt);
-        j++;
-      }
-      
-      let rawText = conteudoLinhas.join('\n');
-      
-      rawText = rawText.replace(/^Atenção:[\s\S]*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
-      rawText = rawText.replace(/^Para responder[\s\S]*?(?:considere|leia|texto|trecho)[^.]*\.\s*/i, '');
-      rawText = rawText.replace(/^.*?quest[õo]es?\s+(\d+)(?:\s*a\s*(\d+))?[\s\S]*?:\s*/i, '');
-      rawText = rawText.replace(/^.*?questions?\s+(\d+)(?:\s*to\s*(\d+))?[\s\S]*?:\s*/i, '');
-      rawText = rawText.replace(/^["“”'‘’]+/, '').replace(/["“”'‘’]+$/, '').trim();
-      
-      let paragrafos = [];
-      let atual = "";
-      let linhasTexto = rawText.split('\n');
-      
-      for (let k = 0; k < linhasTexto.length; k++) {
-          let linha = linhasTexto[k].trim();
-          if (!linha) {
-              if (atual) { paragrafos.push(atual); atual = ""; }
-              continue;
-          }
-          
-          if (atual === "") {
-              atual = linha;
-          } else {
-              let terminaPontuacao = /[.!?:;]$/.test(atual);
-              let comecaMaiuscula = /^[A-ZÀ-Ú"“]/.test(linha);
-              let anteriorCurta = atual.length < 50 && !terminaPontuacao;
-              
-              if ((terminaPontuacao && comecaMaiuscula) || anteriorCurta) {
-                  paragrafos.push(atual);
-                  atual = linha;
-              } else {
-                  atual += " " + linha;
-              }
-          }
-      }
-      if (atual) paragrafos.push(atual);
-      
-      let conteudoFormatado = paragrafos.join('\n\n');
-      
-      if (conteudoFormatado) {
-        for (let n = de; n <= ate; n++) {
-          textosBaseInfo[n] = { de, ate, texto: conteudoFormatado };
-        }
-      }
-      i = j - 1;
+  const fmtData = iso => {
+    try {
+      return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+    } catch (e) { return iso; }
+  };
+
+  const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+
+  const listaCurta = (arr, max = 12) =>
+    arr.length <= max ? arr.join(', ') : `${arr.slice(0, max).join(', ')} e mais ${arr.length - max}`;
+
+  function debounce(fn, ms) {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  }
+
+  function toast(msg) {
+    const el = $('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => el.classList.remove('show'), 2800);
+  }
+
+  function baixarArquivo(nome, conteudo, tipo = 'text/plain;charset=utf-8') {
+    const blob = new Blob([conteudo], { type: tipo });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = nome;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  const paragrafosHtml = texto => String(texto || '').split(/\n{2,}/).map(p => `<p>${esc(p)}</p>`).join('');
+
+  /* =========================================================
+     MÓDULO 2 — ESTADO E ELEMENTOS
+     ========================================================= */
+  const app = {
+    prefs: {},
+    sessao: null,           // simulado atual (é o que vai para o banco)
+    sessaoPendente: null,   // sessão em andamento encontrada no armazenamento
+    pausado: false,
+    analise: null,          // resultado do parser na tela de importação
+    resumo: null,           // resultado calculado ao finalizar
+    filtro: 'todas'
+  };
+
+  const IDS = [
+    'app-container', 'step-import', 'step-quiz', 'step-result',
+    'resume-card', 'resume-info', 'btn-resume', 'btn-discard',
+    'input-questions', 'file-questions', 'status-questions',
+    'input-gabarito', 'file-gabarito', 'status-gabarito', 'import-warnings',
+    'input-title', 'opt-meta', 'opt-shuffle-q', 'opt-shuffle-alt',
+    'btn-example', 'btn-clear', 'btn-start',
+    'history-list', 'btn-export-backup', 'file-backup', 'btn-clear-history', 'storage-note',
+    'btn-help', 'btn-theme',
+    'quiz-layout', 'text-side', 'text-side-title', 'text-side-body',
+    'question-card', 'progress-bar', 'progress-fill', 'question-counter', 'question-origin',
+    'timer-total', 'timer-question', 'question-score', 'btn-toggle-score',
+    'btn-flag-review', 'btn-flag-guess', 'btn-pause',
+    'comando-container', 'text-base-container', 'text-base-label', 'btn-show-text',
+    'question-text', 'options-container', 'feedback',
+    'btn-quit', 'btn-prev', 'btn-next', 'btn-finish',
+    'pause-overlay', 'btn-unpause', 'map-pending', 'question-map',
+    'result-title', 'score-summary', 'result-extra', 'module-table-wrap',
+    'btn-redo-all', 'btn-redo-wrong', 'btn-redo-wrong-guess', 'btn-new',
+    'btn-copy-result', 'btn-download-result', 'result-filters', 'shuffle-note', 'result-list',
+    'text-modal', 'modal-text-title', 'modal-text-body', 'help-modal'
+  ];
+  const els = {};
+  IDS.forEach(id => { els[id.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = $(id); });
+
+  /* =========================================================
+     MÓDULO 3 — PERSISTÊNCIA (via Repositorio)
+     ========================================================= */
+  let tSalvar = null;
+
+  // Agrupa várias mudanças seguidas (cliques, cronômetro) em uma gravação
+  function agendarSalvamento() {
+    if (tSalvar) return;
+    tSalvar = setTimeout(() => { tSalvar = null; salvarAgora(); }, 1500);
+  }
+
+  async function salvarAgora() {
+    if (tSalvar) { clearTimeout(tSalvar); tSalvar = null; }
+    const s = app.sessao;
+    if (!s || s.status !== 'andamento') return;
+    try {
+      await Repo.salvarSessao(s);
+    } catch (e) {
+      console.error(e);
+      toast('⚠ Não foi possível salvar o progresso (armazenamento cheio?).');
     }
   }
 
-  let i = 0;
-  while (i < linhas.length) {
-    const t = linhas[i].trim();
+  const salvarPreferencias = debounce(async () => {
+    try { await Repo.salvarPreferencias(app.prefs); } catch (e) { console.error(e); }
+  }, 600);
 
-    if (!t || reModulo.test(t) || reRotulo.test(t) || reSeparador.test(t)) {
-      i++; continue;
+  document.addEventListener('visibilitychange', () => { if (document.hidden) salvarAgora(); });
+  window.addEventListener('pagehide', () => { salvarAgora(); });
+
+  /* =========================================================
+     MÓDULO 4 — TEMA
+     ========================================================= */
+  function aplicarTema(tema) {
+    document.documentElement.dataset.theme = tema;
+    els.btnTheme.textContent = tema === 'escuro' ? '☀️' : '🌙';
+    els.btnTheme.title = tema === 'escuro' ? 'Usar tema claro' : 'Usar tema escuro';
+  }
+  els.btnTheme.addEventListener('click', () => {
+    const novo = document.documentElement.dataset.theme === 'escuro' ? 'claro' : 'escuro';
+    aplicarTema(novo);
+    app.prefs.tema = novo;
+    salvarPreferencias();
+  });
+
+  /* =========================================================
+     MÓDULO 5 — IMPORTAÇÃO E VALIDAÇÃO
+     ========================================================= */
+  function setStatus(el, tipo, texto) {
+    el.className = 'status ' + tipo;
+    el.textContent = texto;
+  }
+
+  function atualizarStatusImportacao() {
+    const tq = els.inputQuestions.value;
+    const tg = els.inputGabarito.value;
+    const a = P.montarSimulado(tq, tg);
+    app.analise = a;
+    const qs = a.questoes;
+
+    if (!tq.trim()) {
+      setStatus(els.statusQuestions, 'empty', 'Nenhuma questão importada.');
+    } else if (qs.length) {
+      const me = qs.filter(q => q.tipo === 'multipla').length;
+      const ce = qs.length - me;
+      const tb = qs.filter(q => q.textoBase).length;
+      const mods = new Set(qs.map(q => q.modulo).filter(Boolean)).size;
+      const partes = [];
+      if (me && ce) partes.push(`${me} múltipla escolha, ${ce} certo/errado`);
+      else if (ce) partes.push('certo/errado');
+      if (tb) partes.push(`${tb} com texto-base`);
+      if (mods) partes.push(plural(mods, 'módulo', 'módulos'));
+      setStatus(els.statusQuestions, 'ok',
+        `✓ ${plural(qs.length, 'questão detectada', 'questões detectadas')}` + (partes.length ? ` — ${partes.join(' · ')}` : ''));
+    } else {
+      setStatus(els.statusQuestions, 'error', '✗ Não foi possível identificar questões. Verifique o formato.');
     }
 
-    const m = t.match(reQuestao);
-    if (!m) { i++; continue; }
-
-    const numero = parseInt(m[1], 10);
-    let bloco = m[2];
-
-    let j = i + 1;
-    while (j < linhas.length) {
-      const nt = linhas[j].trim();
-      if (!nt) { bloco += '\n'; j++; continue; }
-      if (reModulo.test(nt) || reQuestao.test(nt) || getCabecalhoTexto(nt)) break;
-
-      bloco += '\n' + nt;
-      j++;
+    if (!tg.trim()) {
+      setStatus(els.statusGabarito, 'empty', 'Nenhum gabarito importado.');
+    } else if (a.totalGabarito) {
+      setStatus(els.statusGabarito, 'ok', `✓ ${plural(a.totalGabarito, 'resposta', 'respostas')} no gabarito.`);
+    } else {
+      setStatus(els.statusGabarito, 'error', '✗ Não foi possível identificar o gabarito. Verifique o formato.');
     }
-    i = j;
 
-    const blocoLinear = bloco.replace(/\n+/g, ' ').trim();
-    const alternativas = {};
-    const reAlt = /\(([A-E])\)\s*(.*?)(?=\s*\([A-E]\)|$)/g;
-    let am;
-    while ((am = reAlt.exec(blocoLinear)) !== null) {
-      const txt = am[2].trim().replace(/[.;:]+\s*$/, '').trim();
-      if (txt) alternativas[am[1]] = txt;
+    renderizarAvisos(a, tq, tg);
+    els.btnStart.disabled = !(qs.length && qs.some(q => q.gabarito));
+  }
+
+  function renderizarAvisos(a, tq, tg) {
+    const av = a.avisos;
+    const itens = [];
+    if (tq.trim() && tg.trim()) {
+      if (av.semGabarito.length) itens.push(`<li>Sem gabarito: <strong>${esc(listaCurta(av.semGabarito))}</strong> — ficarão fora da contagem.</li>`);
+      if (av.gabaritoSemQuestao.length) itens.push(`<li>No gabarito, mas sem questão correspondente: <strong>${esc(listaCurta(av.gabaritoSemQuestao))}</strong>.</li>`);
+      if (av.letraInvalida.length) itens.push(`<li>Gabarito aponta alternativa que não existe: <strong>${esc(listaCurta(av.letraInvalida))}</strong>.</li>`);
     }
-    if (Object.keys(alternativas).length === 0) continue;
+    if (av.descartadas) itens.push(`<li>${plural(av.descartadas, 'bloco numerado foi ignorado', 'blocos numerados foram ignorados')} por não ter alternativas reconhecíveis nem gabarito Certo/Errado.</li>`);
+    if (av.numerosRepetidos && a.questoes.length) itens.push('<li class="info">Há números de questão repetidos (ex.: módulos que recomeçam em 1). Eles são pareados com o gabarito pela ordem em que aparecem.</li>');
 
-    const idxAlt = bloco.search(/\([A-E]\)/);
-    const enunciadoRaw = idxAlt >= 0 ? bloco.slice(0, idxAlt) : bloco;
-    
-    const enunciado = enunciadoRaw
-      .split('\n\n')
-      .map(p => p.split('\n').map(l => l.trim()).filter(Boolean).join(' '))
-      .join('\n\n')
-      .trim();
+    if (!itens.length) { els.importWarnings.classList.add('hidden'); return; }
+    els.importWarnings.innerHTML = `<h2>⚠ Confira antes de começar</h2><ul>${itens.join('')}</ul>`;
+    els.importWarnings.classList.remove('hidden');
+  }
 
-    questoes.push({
-      numero,
-      enunciado,
-      alternativas,
-      textoBase: textosBaseInfo[numero] || null
+  const salvarRascunho = debounce(() => {
+    app.prefs.rascunho = { questoes: els.inputQuestions.value, gabarito: els.inputGabarito.value };
+    salvarPreferencias();
+  }, 800);
+
+  const analisarDepois = debounce(atualizarStatusImportacao, 250);
+  [els.inputQuestions, els.inputGabarito].forEach(ta => {
+    ta.addEventListener('input', () => { analisarDepois(); salvarRascunho(); });
+    // Arrastar e soltar arquivo .txt
+    ta.addEventListener('dragover', e => { e.preventDefault(); ta.classList.add('drag-over'); });
+    ta.addEventListener('dragleave', () => ta.classList.remove('drag-over'));
+    ta.addEventListener('drop', async e => {
+      ta.classList.remove('drag-over');
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!f) return; // texto arrastado: comportamento padrão
+      e.preventDefault();
+      ta.value = await f.text();
+      atualizarStatusImportacao(); salvarRascunho();
+    });
+  });
+
+  function ligarArquivo(input, textarea) {
+    input.addEventListener('change', async () => {
+      const f = input.files[0];
+      if (!f) return;
+      textarea.value = await f.text();
+      input.value = '';
+      atualizarStatusImportacao(); salvarRascunho();
     });
   }
+  ligarArquivo(els.fileQuestions, els.inputQuestions);
+  ligarArquivo(els.fileGabarito, els.inputGabarito);
 
-  questoes.sort((a, b) => a.numero - b.numero);
-  return questoes;
-}
+  // <label> com input file escondido: Enter/Espaço abrem o seletor
+  document.querySelectorAll('.btn-file').forEach(lbl => {
+    lbl.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); lbl.querySelector('input').click(); }
+    });
+  });
 
-function importarGabarito(texto) {
-  if (!texto || !texto.trim()) return {};
-  const linhas = texto.replace(/\r\n/g, '\n').split('\n');
-  const gabarito = {};
-  const reInicio = /^\s*(\d+)\s*[\.\)]\s*([A-E])\s*[—\-–:.]\s*(.*)$/;
-  let numeroAtual = null;
-
-  for (const linha of linhas) {
-    if (!linha.trim()) continue;
-    const m = linha.match(reInicio);
-    if (m) {
-      numeroAtual = parseInt(m[1], 10);
-      gabarito[numeroAtual] = { letra: m[2], comentario: m[3].trim() };
-    } else if (numeroAtual !== null) {
-      gabarito[numeroAtual].comentario += ' ' + linha.trim();
-    }
-  }
-  return gabarito;
-}
-
-/* =========================================================
-   MÓDULO 2 — ESTADO E ELEMENTOS
-   ========================================================= */
-const state = {
-  questoes: [], gabarito: {},
-  indiceAtual: 0, respostas: {}, acertos: 0,
-  acertosVisivel: true
-};
-
-const els = {
-  stepImport: document.getElementById('step-import'),
-  stepQuiz: document.getElementById('step-quiz'),
-  stepResult: document.getElementById('step-result'),
-  inputQuestions: document.getElementById('input-questions'),
-  inputGabarito: document.getElementById('input-gabarito'),
-  statusQuestions: document.getElementById('status-questions'),
-  statusGabarito: document.getElementById('status-gabarito'),
-  btnStart: document.getElementById('btn-start'),
-  btnExample: document.getElementById('btn-example'),
-  btnRecheck: document.getElementById('btn-recheck'),
-  btnNext: document.getElementById('btn-next'),
-  btnPrev: document.getElementById('btn-prev'),
-  btnFinish: document.getElementById('btn-finish'),
-  btnQuit: document.getElementById('btn-quit'),
-  btnToggleScore: document.getElementById('btn-toggle-score'),
-  btnRestart: document.getElementById('btn-restart'),
-  btnNew: document.getElementById('btn-new'),
-  btnCopyResult: document.getElementById('btn-copy-result'), // Novo elemento
-  progressFill: document.getElementById('progress-fill'),
-  questionCounter: document.getElementById('question-counter'),
-  questionScore: document.getElementById('question-score'),
-  textBaseContainer: document.getElementById('text-base-container'),
-  questionText: document.getElementById('question-text'),
-  optionsContainer: document.getElementById('options-container'),
-  unansweredCount: document.getElementById('unanswered-count'),
-  unansweredList: document.getElementById('unanswered-list'),
-  scoreSummary: document.getElementById('score-summary'),
-  resultList: document.getElementById('result-list')
-};
-
-/* =========================================================
-   MÓDULO 3 — STATUS / VALIDAÇÃO DA IMPORTAÇÃO
-   ========================================================= */
-function setStatus(el, tipo, texto) {
-  el.className = 'status ' + tipo;
-  el.textContent = texto;
-}
-
-function atualizarStatusImportacao() {
-  const textoQ = els.inputQuestions.value;
-  const textoG = els.inputGabarito.value;
-
-  const questoes = importarQuestoes(textoQ);
-  if (!textoQ.trim()) {
-    setStatus(els.statusQuestions, 'empty', 'Nenhuma questão importada.');
-  } else if (questoes.length > 0) {
-    const comTextoBase = questoes.filter(q => q.textoBase).length;
-    setStatus(els.statusQuestions, 'ok',
-      `✓ ${questoes.length} questão(ões) detectada(s)` +
-      (comTextoBase ? ` — ${comTextoBase} com texto-base.` : '.'));
-  } else {
-    setStatus(els.statusQuestions, 'error',
-      '✗ Não foi possível identificar questões. Verifique o formato.');
-  }
-
-  const gabarito = importarGabarito(textoG);
-  const totalGab = Object.keys(gabarito).length;
-  if (!textoG.trim()) {
-    setStatus(els.statusGabarito, 'empty', 'Nenhum gabarito importado.');
-  } else if (totalGab > 0) {
-    setStatus(els.statusGabarito, 'ok', `✓ ${totalGab} resposta(s) no gabarito.`);
-  } else {
-    setStatus(els.statusGabarito, 'error',
-      '✗ Não foi possível identificar o gabarito. Verifique o formato.');
-  }
-
-  els.btnStart.disabled = !(questoes.length > 0 && totalGab > 0);
-}
-
-['input', 'change', 'keyup', 'paste', 'blur'].forEach(evt => {
-  els.inputQuestions.addEventListener(evt, atualizarStatusImportacao);
-  els.inputGabarito.addEventListener(evt, atualizarStatusImportacao);
-});
-
-setInterval(() => {
-  if (!els.stepImport.classList.contains('hidden')) {
-    atualizarStatusImportacao();
-  }
-}, 800);
-
-els.btnRecheck.addEventListener('click', atualizarStatusImportacao);
-
-/* =========================================================
-   MÓDULO 4 — EXEMPLO
-   ========================================================= */
-const EX_Q = `Texto-base para as questões 1 a 2:
+  /* Exemplo */
+  const EX_Q = `MÓDULO 1 — Língua Portuguesa
+Texto para as questões 1 a 2:
 "A adoção de inteligência artificial em processos seletivos públicos tem crescido. Ainda que a tecnologia traga ganhos de eficiência, especialistas alertam para riscos de vieses algorítmicos, que podem reproduzir desigualdades já existentes."
 1. De acordo com o texto, é correto afirmar que: (A) A IA elimina totalmente os vieses. (B) O uso de IA tem diminuído. (C) A eficiência da IA vem acompanhada de riscos que exigem monitoramento. (D) As auditorias já eliminaram os riscos. (E) O texto defende o fim do uso de IA.
 2. A expressão "ainda que" estabelece relação de: (A) causa (B) conclusão (C) concessão (D) finalidade (E) condição
-3. Em textos técnicos institucionais (editais), predomina o tipo textual: (A) narrativo (B) descritivo (C) dissertativo-argumentativo (D) injuntivo (E) lírico`;
 
-const EX_G = `1. C — O texto afirma "ganhos de eficiência" e, ao mesmo tempo, "riscos".
-2. C — "Ainda que" introduz concessão.
-3. D — Editais estabelecem normas e instruem sobre procedimentos.`;
+MÓDULO 2 — Tecnologia da Informação
+1. Em HTML, a tag usada para incluir código JavaScript em uma página é:
+a) <link>
+b) <script>
+c) <js>
+d) <code>
+e) <style>
+Julgue os itens a seguir, acerca de bancos de dados relacionais.
+2. A chave primária de uma tabela pode conter valores nulos, desde que não se repitam.
+3. Uma chave estrangeira referencia a chave primária (ou candidata) de outra tabela, garantindo a integridade referencial.`;
 
-els.btnExample.addEventListener('click', () => {
-  els.inputQuestions.value = EX_Q;
-  els.inputGabarito.value = EX_G;
-  atualizarStatusImportacao();
-});
+  const EX_G = `MÓDULO 1
+1. C — O texto afirma "ganhos de eficiência" e, ao mesmo tempo, aponta "riscos".
+2. C — "Ainda que" introduz oração concessiva.
+MÓDULO 2
+1. B — A tag <script> incorpora ou referencia código JavaScript.
+2. Errado — A chave primária não admite valores nulos (integridade de entidade).
+3. Certo — É exatamente o papel da chave estrangeira.`;
 
-/* =========================================================
-   MÓDULO 5 — INÍCIO
-   ========================================================= */
-els.btnStart.addEventListener('click', () => {
-  state.questoes = importarQuestoes(els.inputQuestions.value);
-  state.gabarito = importarGabarito(els.inputGabarito.value);
-  state.indiceAtual = 0;
-  state.respostas = {};
-  state.acertos = 0;
-  state.acertosVisivel = true;
-  atualizarBotaoToggleScore();
-
-  if (state.questoes.length === 0) { alert('Nenhuma questão válida encontrada.'); return; }
-
-  els.stepImport.classList.add('hidden');
-  els.stepQuiz.classList.remove('hidden');
-  renderizarQuestao();
-});
-
-/* =========================================================
-   MÓDULO 6 — QUESTIONÁRIO
-   ========================================================= */
-function recalcularAcertos() {
-  let a = 0;
-  for (const q of state.questoes) {
-    const r = state.respostas[q.numero];
-    const g = state.gabarito[q.numero];
-    if (r && g && r === g.letra) a++;
-  }
-  state.acertos = a;
-}
-
-function atualizarContadorAcertos() {
-  if (state.acertosVisivel) {
-    els.questionScore.textContent = `Acertos: ${state.acertos}`;
-    els.questionScore.style.visibility = 'visible';
-  } else {
-    els.questionScore.textContent = 'Acertos: •••';
-  }
-}
-
-function atualizarBotaoToggleScore() {
-  if (state.acertosVisivel) {
-    els.btnToggleScore.textContent = '👁️ Ocultar';
-    els.btnToggleScore.title = 'Ocultar contador de acertos';
-  } else {
-    els.btnToggleScore.textContent = '👁️‍🗨️ Mostrar';
-    els.btnToggleScore.title = 'Mostrar contador de acertos';
-  }
-}
-
-els.btnToggleScore.addEventListener('click', () => {
-  state.acertosVisivel = !state.acertosVisivel;
-  atualizarContadorAcertos();
-  atualizarBotaoToggleScore();
-});
-
-function todasResolvidas() {
-  return state.questoes.every(q => state.respostas[q.numero]);
-}
-
-function atualizarBotaoFinalizar() {
-  const pronto = todasResolvidas();
-  els.btnFinish.disabled = !pronto;
-  els.btnFinish.classList.toggle('ready', pronto);
-}
-
-function renderizarListaNaoResolvidas() {
-  const naoResolvidas = state.questoes.filter(q => !state.respostas[q.numero]);
-  els.unansweredCount.textContent = `(${naoResolvidas.length})`;
-
-  els.unansweredList.innerHTML = '';
-  if (naoResolvidas.length === 0) {
-    const p = document.createElement('div');
-    p.className = 'all-done';
-    p.textContent = '🎉 Todas as questões foram respondidas! Clique em "Finalizar ✓" para ver o resultado.';
-    els.unansweredList.appendChild(p);
-    return;
-  }
-
-  naoResolvidas.forEach(q => {
-    const btn = document.createElement('button');
-    btn.className = 'unanswered-chip';
-    btn.textContent = `Q${q.numero}`;
-    btn.title = 'Ir para esta questão';
-    btn.addEventListener('click', () => {
-      const idx = state.questoes.findIndex(x => x.numero === q.numero);
-      if (idx >= 0) {
-        state.indiceAtual = idx;
-        renderizarQuestao();
-        els.stepQuiz.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    });
-    els.unansweredList.appendChild(btn);
+  els.btnExample.addEventListener('click', () => {
+    els.inputQuestions.value = EX_Q;
+    els.inputGabarito.value = EX_G;
+    atualizarStatusImportacao(); salvarRascunho();
   });
-}
 
-function renderizarQuestao() {
-  const q = state.questoes[state.indiceAtual];
-  const total = state.questoes.length;
+  els.btnClear.addEventListener('click', () => {
+    if ((els.inputQuestions.value || els.inputGabarito.value) && !confirm('Limpar as questões e o gabarito colados?')) return;
+    els.inputQuestions.value = '';
+    els.inputGabarito.value = '';
+    els.inputTitle.value = '';
+    atualizarStatusImportacao(); salvarRascunho();
+  });
 
-  els.progressFill.style.width = `${((state.indiceAtual) / total) * 100}%`;
-  els.questionCounter.textContent = `Questão ${state.indiceAtual + 1} de ${total} — Q${q.numero}`;
+  /* =========================================================
+     MÓDULO 6 — CONFIGURAÇÃO E INÍCIO
+     ========================================================= */
+  function lerConfig() {
+    const modo = (document.querySelector('input[name="modo"]:checked') || {}).value || 'prova';
+    const meta = parseFloat(els.optMeta.value);
+    return {
+      modo,
+      embaralharQuestoes: els.optShuffleQ.checked,
+      embaralharAlternativas: els.optShuffleAlt.checked,
+      metaSegundos: isFinite(meta) && meta > 0 ? Math.round(meta * 60) : 0
+    };
+  }
 
-  recalcularAcertos();
-  atualizarContadorAcertos();
+  function aplicarConfigNaTela(c) {
+    if (!c) return;
+    const r = document.querySelector(`input[name="modo"][value="${c.modo}"]`);
+    if (r) r.checked = true;
+    els.optShuffleQ.checked = !!c.embaralharQuestoes;
+    els.optShuffleAlt.checked = !!c.embaralharAlternativas;
+    els.optMeta.value = c.metaSegundos ? c.metaSegundos / 60 : 0;
+  }
 
-  if (q.textoBase) {
-    els.textBaseContainer.classList.remove('hidden');
-    els.textBaseContainer.innerHTML = `
-      <div>
-        📖 Texto para responder às questões de número <strong>${q.textoBase.de} a ${q.textoBase.ate}</strong>
-      </div>
-      <button class="btn-primary" id="btn-show-text" style="padding: 8px 16px; font-size: 0.85rem;">Mostrar Texto</button>
-    `;
-    
-    const btnShow = document.getElementById('btn-show-text');
-    if (btnShow) {
-      btnShow.addEventListener('click', () => {
-        document.getElementById('modal-text-title').textContent = `Texto (Questões ${q.textoBase.de} a ${q.textoBase.ate})`;
-        const formattedHTML = q.textoBase.texto
-            .split('\n\n')
-            .map(para => `<p>${para}</p>`)
-            .join('');
-        document.getElementById('modal-text-body').innerHTML = formattedHTML;
-        document.getElementById('text-modal').classList.remove('hidden');
+  [els.optMeta, els.optShuffleQ, els.optShuffleAlt, ...document.querySelectorAll('input[name="modo"]')]
+    .forEach(el => el.addEventListener('change', () => { app.prefs.ultimaConfig = lerConfig(); salvarPreferencias(); }));
+
+  function tituloPadrao(questoes) {
+    const mods = [...new Set(questoes.map(q => q.modulo).filter(Boolean))];
+    if (mods.length === 1) return mods[0];
+    if (mods.length > 1) return `${mods[0]} + ${mods.length - 1}`;
+    return `Simulado de ${fmtData(new Date().toISOString())}`;
+  }
+
+  async function iniciarSimulado(questoes, { titulo, config }) {
+    const lista = config.embaralharQuestoes ? embaralhar(questoes) : questoes.slice();
+    const ordemAlt = {};
+    if (config.embaralharAlternativas) {
+      lista.forEach(q => {
+        if (q.tipo === 'multipla') ordemAlt[q.key] = embaralhar(LETRAS.split('').filter(l => q.alternativas[l]));
       });
     }
-  } else {
-    els.textBaseContainer.classList.add('hidden');
-    els.textBaseContainer.innerHTML = '';
-  }
-
-  els.questionText.textContent = `${q.numero}. ${q.enunciado}`;
-
-  els.optionsContainer.innerHTML = '';
-  const letras = ['A', 'B', 'C', 'D', 'E'].filter(l => q.alternativas[l]);
-  const respostaSalva = state.respostas[q.numero];
-
-  letras.forEach(letra => {
-    const div = document.createElement('div');
-    div.className = 'option' + (respostaSalva === letra ? ' selected' : '');
-    div.dataset.letra = letra;
-    div.innerHTML = `<span class="option-letter">(${letra})</span><span>${q.alternativas[letra]}</span>`;
-    div.addEventListener('click', () => selecionarAlternativa(letra));
-    els.optionsContainer.appendChild(div);
-  });
-
-  els.btnPrev.disabled = state.indiceAtual === 0;
-  els.btnNext.disabled = state.indiceAtual === total - 1;
-  atualizarBotaoFinalizar();
-  renderizarListaNaoResolvidas();
-}
-
-function selecionarAlternativa(letra) {
-  const q = state.questoes[state.indiceAtual];
-  state.respostas[q.numero] = letra;
-  recalcularAcertos();
-  atualizarContadorAcertos();
-
-  document.querySelectorAll('.option').forEach(el => {
-    el.classList.toggle('selected', el.dataset.letra === letra);
-  });
-
-  renderizarListaNaoResolvidas();
-  atualizarBotaoFinalizar();
-}
-
-els.btnNext.addEventListener('click', () => {
-  if (state.indiceAtual < state.questoes.length - 1) {
-    state.indiceAtual++;
+    // Modelo do documento salvo — tudo JSON puro, pronto para Firestore
+    app.sessao = {
+      id: uid(),
+      status: 'andamento',
+      criadoEm: new Date().toISOString(),
+      titulo,
+      config,
+      questoes: lista,
+      ordemAlt,
+      indiceAtual: 0,
+      respostas: {},    // { [key]: letra original }
+      marcacoes: {},    // { [key]: { revisar, chute } }
+      riscadas: {},     // { [key]: [letras] }
+      tempos: {},       // { [key]: segundos }
+      tempoTotal: 0,
+      acertosVisivel: config.modo === 'estudo'
+    };
+    app.pausado = false;
+    await salvarAgora();
+    mostrarEtapa('quiz');
     renderizarQuestao();
+    iniciarRelogio();
   }
-});
 
-els.btnPrev.addEventListener('click', () => {
-  if (state.indiceAtual > 0) {
-    state.indiceAtual--;
-    renderizarQuestao();
-  }
-});
-
-els.btnFinish.addEventListener('click', () => {
-  if (!todasResolvidas()) {
-    alert('Responda todas as questões antes de finalizar.');
-    return;
-  }
-  mostrarResultado();
-});
-
-els.btnQuit.addEventListener('click', () => {
-  if (confirm('Deseja sair? Seu progresso será perdido.')) resetarApp();
-});
-
-/* =========================================================
-   MÓDULO 7 — RESULTADO
-   ========================================================= */
-function mostrarResultado() {
-  els.stepQuiz.classList.add('hidden');
-  els.stepResult.classList.remove('hidden');
-
-  recalcularAcertos();
-  const total = state.questoes.length;
-  const acertos = state.acertos;
-  const erros = total - acertos;
-  const percentual = Math.round((acertos / total) * 100);
-
-  els.scoreSummary.innerHTML = `
-    <div class="score-box correct"><span class="num">${acertos}</span><span class="label">Acertos</span></div>
-    <div class="score-box wrong"><span class="num">${erros}</span><span class="label">Erros</span></div>
-    <div class="score-box percent"><span class="num">${percentual}%</span><span class="label">Aproveitamento</span></div>
-  `;
-
-  els.resultList.innerHTML = '';
-  state.questoes.forEach(q => {
-    const gab = state.gabarito[q.numero];
-    const resposta = state.respostas[q.numero];
-    const acertou = gab && resposta === gab.letra;
-
-    const item = document.createElement('div');
-    item.className = 'result-item' + (acertou ? '' : ' incorrect');
-
-    const letras = ['A', 'B', 'C', 'D', 'E'].filter(l => q.alternativas[l]);
-    const opcoesHtml = letras.map(letra => {
-      let cls = 'opt';
-      if (gab && gab.letra === letra) cls += ' correct';
-      if (resposta === letra && (!gab || gab.letra !== letra)) cls += ' wrong';
-      return `<div class="${cls}">(${letra}) ${q.alternativas[letra]}</div>`;
-    }).join('');
-
-    const comentarioHtml = gab
-      ? `<div class="comment"><strong>Gabarito:</strong> (${gab.letra}) — ${gab.comentario}</div>`
-      : `<div class="comment"><em>Sem comentário disponível.</em></div>`;
-
-    item.innerHTML = `
-      <h3>
-        <span class="badge ${acertou ? 'ok' : 'no'}">${acertou ? 'Acertou' : 'Errou'}</span>
-        <span>Questão ${q.numero} — Sua resposta: (${resposta || '—'})</span>
-      </h3>
-      <div style="font-size:.92rem;margin-bottom:8px;white-space:pre-line">${q.enunciado}</div>
-      <div class="result-options">${opcoesHtml}</div>
-      ${comentarioHtml}
-    `;
-    els.resultList.appendChild(item);
-  });
-}
-
-// Lógica para copiar o gabarito formatado para a área de transferência
-els.btnCopyResult.addEventListener('click', () => {
-  let texto = "=== GABARITO COMENTADO ===\n\n";
-  
-  state.questoes.forEach(q => {
-    const gab = state.gabarito[q.numero];
-    const resposta = state.respostas[q.numero];
-    const acertou = gab && resposta === gab.letra;
-    
-    texto += `Questão ${q.numero} - Sua resposta: (${resposta || '—'}) [${acertou ? 'ACERTOU' : 'ERROU'}]\n`;
-    texto += `${q.enunciado}\n\n`;
-    
-    const letras = ['A', 'B', 'C', 'D', 'E'].filter(l => q.alternativas[l]);
-    letras.forEach(letra => {
-      texto += `(${letra}) ${q.alternativas[letra]}\n`;
-    });
-    
-    texto += `\n`;
-    if (gab) {
-      texto += `Gabarito: (${gab.letra}) — ${gab.comentario}\n`;
-    } else {
-      texto += `Gabarito: Sem comentário disponível.\n`;
+  els.btnStart.addEventListener('click', async () => {
+    atualizarStatusImportacao();
+    const a = app.analise;
+    if (!a || !a.questoes.length) { toast('Nenhuma questão válida encontrada.'); return; }
+    if (app.sessaoPendente) {
+      if (!confirm('Há um simulado em andamento salvo. Iniciar um novo vai descartá-lo. Continuar?')) return;
+      await Repo.excluirSessoesEmAndamento();
+      app.sessaoPendente = null;
     }
-    texto += "----------------------------------------\n\n";
+    const config = lerConfig();
+    app.prefs.ultimaConfig = config;
+    salvarPreferencias();
+    const titulo = els.inputTitle.value.trim() || tituloPadrao(a.questoes);
+    iniciarSimulado(clonar(a.questoes), { titulo, config });
   });
-  
-  navigator.clipboard.writeText(texto).then(() => {
-    const originalText = els.btnCopyResult.innerHTML;
-    els.btnCopyResult.innerHTML = '✅ Copiado!';
-    els.btnCopyResult.style.color = 'var(--success)';
-    els.btnCopyResult.style.borderColor = 'var(--success)';
-    setTimeout(() => {
-      els.btnCopyResult.innerHTML = originalText;
-      els.btnCopyResult.style.color = '';
-      els.btnCopyResult.style.borderColor = '';
-    }, 2000);
-  }).catch(err => {
-    console.error('Erro ao copiar: ', err);
-    alert('Não foi possível copiar. Seu navegador pode não suportar esta função.');
-  });
-});
 
-/* =========================================================
-   MÓDULO 8 — RESET E MODAL
-   ========================================================= */
-els.btnRestart.addEventListener('click', () => {
-  state.indiceAtual = 0;
-  state.respostas = {};
-  state.acertos = 0;
-  state.acertosVisivel = true;
-  atualizarBotaoToggleScore();
-  els.stepResult.classList.add('hidden');
-  els.stepQuiz.classList.remove('hidden');
-  renderizarQuestao();
-});
-
-els.btnNew.addEventListener('click', resetarApp);
-
-function resetarApp() {
-  state.questoes = []; state.gabarito = {};
-  state.indiceAtual = 0; state.respostas = {}; state.acertos = 0;
-  state.acertosVisivel = true;
-  atualizarBotaoToggleScore();
-  els.stepQuiz.classList.add('hidden');
-  els.stepResult.classList.add('hidden');
-  els.stepImport.classList.remove('hidden');
-  els.inputQuestions.value = '';
-  els.inputGabarito.value = '';
-  atualizarStatusImportacao();
-}
-
-// --- CONTROLE DO MODAL (POPUP) ---
-function fecharModal() {
-  document.getElementById('text-modal').classList.add('hidden');
-}
-
-document.getElementById('btn-close-modal').addEventListener('click', fecharModal);
-document.getElementById('btn-close-modal-footer').addEventListener('click', fecharModal);
-
-document.getElementById('text-modal').addEventListener('click', (e) => {
-  if (e.target.id === 'text-modal') fecharModal();
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    const modal = document.getElementById('text-modal');
-    if (!modal.classList.contains('hidden')) fecharModal();
+  /* Retomar sessão salva */
+  async function verificarSessaoPendente() {
+    let s = null;
+    try { s = await Repo.carregarSessaoEmAndamento(); } catch (e) { console.error(e); }
+    app.sessaoPendente = s;
+    if (!s) { els.resumeCard.classList.add('hidden'); return; }
+    const resp = s.questoes.filter(q => s.respostas[q.key]).length;
+    els.resumeInfo.textContent =
+      `${s.titulo} — ${resp}/${s.questoes.length} respondidas · ${fmtTempo(s.tempoTotal)} · modo ${s.config.modo} · salvo em ${fmtData(s.atualizadoEm)}`;
+    els.resumeCard.classList.remove('hidden');
   }
-});
 
-/* Init */
-atualizarStatusImportacao();
-atualizarBotaoToggleScore();
+  els.btnResume.addEventListener('click', () => {
+    if (!app.sessaoPendente) return;
+    app.sessao = app.sessaoPendente;
+    app.sessaoPendente = null;
+    app.pausado = false;
+    els.resumeCard.classList.add('hidden');
+    mostrarEtapa('quiz');
+    renderizarQuestao();
+    iniciarRelogio();
+  });
+
+  els.btnDiscard.addEventListener('click', async () => {
+    if (!app.sessaoPendente || !confirm('Descartar o simulado em andamento? O progresso será perdido.')) return;
+    await Repo.excluirSessao(app.sessaoPendente.id);
+    app.sessaoPendente = null;
+    els.resumeCard.classList.add('hidden');
+  });
+
+  /* =========================================================
+     MÓDULO 7 — NAVEGAÇÃO ENTRE ETAPAS
+     ========================================================= */
+  function mostrarEtapa(nome) {
+    els.stepImport.classList.toggle('hidden', nome !== 'import');
+    els.stepQuiz.classList.toggle('hidden', nome !== 'quiz');
+    els.stepResult.classList.toggle('hidden', nome !== 'result');
+    const temTexto = nome === 'quiz' && app.sessao && app.sessao.questoes.some(q => q.textoBase);
+    els.appContainer.classList.toggle('wide', !!temTexto);
+    els.quizLayout.classList.toggle('has-text', !!temTexto);
+    window.scrollTo({ top: 0 });
+  }
+
+  /* =========================================================
+     MÓDULO 8 — QUESTIONÁRIO
+     ========================================================= */
+  const qAtual = () => app.sessao.questoes[app.sessao.indiceAtual];
+  const estaRespondida = q => !!app.sessao.respostas[q.key];
+
+  // Alternativas na ordem exibida: rótulo na tela × letra original
+  function opcoesExibicao(q) {
+    if (q.tipo === 'ce') {
+      return [{ rotulo: 'C', orig: 'C', texto: 'Certo' }, { rotulo: 'E', orig: 'E', texto: 'Errado' }];
+    }
+    const ordem = (app.sessao.ordemAlt && app.sessao.ordemAlt[q.key]) || LETRAS.split('').filter(l => q.alternativas[l]);
+    return ordem.map((orig, i) => ({ rotulo: LETRAS[i], orig, texto: q.alternativas[orig] }));
+  }
+  const rotuloNaTela = (q, orig) => (opcoesExibicao(q).find(o => o.orig === orig) || {}).rotulo || orig;
+  const nomeResposta = (q, letra) => q.tipo === 'ce' ? (letra === 'C' ? 'Certo' : letra === 'E' ? 'Errado' : letra) : letra;
+
+  function situacao(q, s = app.sessao) {
+    const g = q.gabarito;
+    if (!g) return 'sem-gabarito';
+    if (g.resposta === 'X') return 'anulada';
+    const r = s.respostas[q.key];
+    if (!r) return 'branco';
+    return r === g.resposta ? 'certa' : 'errada';
+  }
+
+  function renderizarQuestao() {
+    const s = app.sessao;
+    const q = qAtual();
+    const total = s.questoes.length;
+    const estudo = s.config.modo === 'estudo';
+    const focoAnterior = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.orig : null;
+
+    els.stepQuiz.classList.toggle('mode-estudo', estudo);
+
+    // Progresso = respondidas / total
+    const respondidas = s.questoes.filter(estaRespondida).length;
+    const pct = Math.round(respondidas / total * 100);
+    els.progressFill.style.width = `${pct}%`;
+    els.progressBar.setAttribute('aria-valuenow', pct);
+    els.questionCounter.textContent = `Questão ${s.indiceAtual + 1} de ${total}`;
+    els.questionOrigin.textContent = `· ${P.rotulo(q)}${q.tipo === 'ce' ? ' · Certo/Errado' : ''}`;
+
+    atualizarPlacar();
+    atualizarRelogios();
+
+    // Marcações
+    const marc = s.marcacoes[q.key] || {};
+    els.btnFlagReview.setAttribute('aria-pressed', !!marc.revisar);
+    els.btnFlagGuess.setAttribute('aria-pressed', !!marc.chute);
+
+    // Comando (ex.: "Julgue os itens a seguir")
+    if (q.comando) {
+      els.comandoContainer.textContent = q.comando;
+      els.comandoContainer.classList.remove('hidden');
+    } else {
+      els.comandoContainer.classList.add('hidden');
+    }
+
+    // Texto-base: barra com botão (telas estreitas) + painel lateral (telas largas)
+    if (q.textoBase) {
+      const intervalo = q.textoBase.de === q.textoBase.ate ? `${q.textoBase.de}` : `${q.textoBase.de} a ${q.textoBase.ate}`;
+      els.textBaseLabel.innerHTML = `📖 Texto para as questões <strong>${esc(intervalo)}</strong>`;
+      els.textBaseContainer.classList.remove('hidden');
+      els.textSideTitle.textContent = `📖 Texto — questões ${intervalo}`;
+      els.textSideBody.innerHTML = paragrafosHtml(q.textoBase.texto);
+    } else {
+      els.textBaseContainer.classList.add('hidden');
+      els.textSideTitle.textContent = 'Texto-base';
+      els.textSideBody.innerHTML = '<p class="empty-text">Esta questão não tem texto-base.</p>';
+    }
+
+    els.questionText.textContent = q.enunciado ? `${q.numero}. ${q.enunciado}` : `${q.numero}.`;
+
+    // Alternativas
+    const resp = s.respostas[q.key];
+    const riscadas = new Set(s.riscadas[q.key] || []);
+    const travada = estudo && !!resp;
+    const g = q.gabarito;
+    els.optionsContainer.innerHTML = '';
+
+    opcoesExibicao(q).forEach(o => {
+      const row = document.createElement('div');
+      row.className = 'option-row';
+
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'option';
+      b.dataset.orig = o.orig;
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-checked', resp === o.orig);
+      if (resp === o.orig) b.classList.add('selected');
+      if (riscadas.has(o.orig)) b.classList.add('struck');
+      if (travada) {
+        b.classList.add('locked');
+        b.setAttribute('aria-disabled', 'true');
+        if (g && g.resposta !== 'X') {
+          if (o.orig === g.resposta) b.classList.add('correct');
+          else if (o.orig === resp) b.classList.add('wrong');
+        }
+      }
+      b.innerHTML = `<span class="option-letter">(${o.rotulo})</span><span class="option-text">${esc(o.texto)}</span>`;
+      b.addEventListener('click', () => selecionar(o.orig));
+      b.addEventListener('contextmenu', e => { e.preventDefault(); alternarRisco(o.orig); });
+      row.appendChild(b);
+
+      if (q.tipo === 'multipla' && !travada) {
+        const r = document.createElement('button');
+        r.type = 'button';
+        r.className = 'btn-strike';
+        r.textContent = '✂';
+        r.title = 'Riscar/desriscar (Shift + letra ou botão direito)';
+        r.setAttribute('aria-label', `Riscar alternativa ${o.rotulo}`);
+        r.setAttribute('aria-pressed', riscadas.has(o.orig));
+        r.addEventListener('click', () => alternarRisco(o.orig));
+        row.appendChild(r);
+      }
+      els.optionsContainer.appendChild(row);
+    });
+
+    renderizarFeedback(q, resp);
+
+    els.btnPrev.disabled = s.indiceAtual === 0;
+    els.btnNext.disabled = s.indiceAtual === total - 1;
+    els.btnFinish.classList.toggle('ready', respondidas === total);
+
+    renderizarMapa();
+    alternarPausa(app.pausado);
+
+    if (focoAnterior) {
+      const alvo = els.optionsContainer.querySelector(`.option[data-orig="${focoAnterior}"]`);
+      if (alvo) alvo.focus({ preventScroll: true });
+    }
+  }
+
+  function renderizarFeedback(q, resp) {
+    const s = app.sessao;
+    if (s.config.modo !== 'estudo' || !resp) { els.feedback.classList.add('hidden'); return; }
+    const g = q.gabarito;
+    let cls, titulo, nota = '';
+    if (!g) { cls = 'neutral'; titulo = 'Sem gabarito para esta questão.'; }
+    else if (g.resposta === 'X') { cls = 'neutral'; titulo = 'Questão anulada.'; }
+    else if (resp === g.resposta) { cls = 'ok'; titulo = '✓ Resposta correta!'; }
+    else {
+      cls = 'no';
+      titulo = q.tipo === 'ce'
+        ? `✗ Resposta incorreta. O item está ${nomeResposta(q, g.resposta).toUpperCase()}.`
+        : `✗ Resposta incorreta. Correta: (${rotuloNaTela(q, g.resposta)}).`;
+    }
+    if (g && g.resposta !== 'X' && s.ordemAlt[q.key] && rotuloNaTela(q, g.resposta) !== g.resposta) {
+      nota = `Alternativas embaralhadas — no gabarito original a correta é (${g.resposta}).`;
+    }
+    els.feedback.className = `feedback ${cls}`;
+    els.feedback.innerHTML =
+      `<div class="fb-title">${esc(titulo)}</div>` +
+      (g && g.comentario ? `<div>${esc(g.comentario)}</div>` : '') +
+      (nota ? `<div class="fb-note">${esc(nota)}</div>` : '');
+  }
+
+  function atualizarPlacar() {
+    const s = app.sessao;
+    const acertos = s.questoes.filter(q => situacao(q) === 'certa').length;
+    els.questionScore.textContent = s.acertosVisivel ? `Acertos: ${acertos}` : 'Acertos: •••';
+    els.btnToggleScore.textContent = s.acertosVisivel ? '👁️ Ocultar' : '👁️‍🗨️ Mostrar';
+    els.btnToggleScore.title = s.acertosVisivel ? 'Ocultar contador de acertos' : 'Mostrar contador de acertos';
+  }
+
+  els.btnToggleScore.addEventListener('click', () => {
+    app.sessao.acertosVisivel = !app.sessao.acertosVisivel;
+    atualizarPlacar();
+    agendarSalvamento();
+  });
+
+  function selecionar(orig) {
+    const s = app.sessao;
+    const q = qAtual();
+    if (app.pausado) return;
+    if (s.config.modo === 'estudo' && s.respostas[q.key]) return; // estudo: resposta travada
+    if (s.respostas[q.key] === orig && s.config.modo === 'prova') {
+      delete s.respostas[q.key]; // clicar de novo desmarca (útil no Certo/Errado)
+    } else {
+      s.respostas[q.key] = orig;
+      const r = s.riscadas[q.key];
+      if (r) {
+        s.riscadas[q.key] = r.filter(l => l !== orig);
+        if (!s.riscadas[q.key].length) delete s.riscadas[q.key];
+      }
+    }
+    renderizarQuestao();
+    agendarSalvamento();
+  }
+
+  function alternarRisco(orig) {
+    const s = app.sessao;
+    const q = qAtual();
+    if (app.pausado || q.tipo !== 'multipla') return;
+    if (s.config.modo === 'estudo' && s.respostas[q.key]) return;
+    const set = new Set(s.riscadas[q.key] || []);
+    if (set.has(orig)) set.delete(orig);
+    else {
+      set.add(orig);
+      if (s.respostas[q.key] === orig) delete s.respostas[q.key];
+    }
+    if (set.size) s.riscadas[q.key] = [...set]; else delete s.riscadas[q.key];
+    renderizarQuestao();
+    agendarSalvamento();
+  }
+
+  function alternarMarcacao(tipo) {
+    const s = app.sessao;
+    const q = qAtual();
+    const m = s.marcacoes[q.key] || {};
+    m[tipo] = !m[tipo];
+    if (m.revisar || m.chute) s.marcacoes[q.key] = m; else delete s.marcacoes[q.key];
+    renderizarQuestao();
+    agendarSalvamento();
+  }
+  els.btnFlagReview.addEventListener('click', () => alternarMarcacao('revisar'));
+  els.btnFlagGuess.addEventListener('click', () => alternarMarcacao('chute'));
+
+  function irPara(idx, rolar = false) {
+    const s = app.sessao;
+    if (idx < 0 || idx >= s.questoes.length) return;
+    s.indiceAtual = idx;
+    renderizarQuestao();
+    agendarSalvamento();
+    if (rolar) els.questionCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  els.btnNext.addEventListener('click', () => irPara(app.sessao.indiceAtual + 1));
+  els.btnPrev.addEventListener('click', () => irPara(app.sessao.indiceAtual - 1));
+
+  function renderizarMapa() {
+    const s = app.sessao;
+    const estudo = s.config.modo === 'estudo';
+    const pendentes = s.questoes.filter(q => !estaRespondida(q)).length;
+    const revisar = Object.values(s.marcacoes).filter(m => m.revisar).length;
+    els.mapPending.textContent = `— ${plural(pendentes, 'pendente', 'pendentes')}` + (revisar ? ` · ${revisar} para revisar` : '');
+
+    els.questionMap.innerHTML = '';
+    s.questoes.forEach((q, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'map-cell';
+      const resp = estaRespondida(q);
+      const sit = situacao(q);
+      if (resp) b.classList.add(estudo && sit === 'certa' ? 'right' : estudo && sit === 'errada' ? 'wrong' : 'answered');
+      if (i === s.indiceAtual) { b.classList.add('current'); b.setAttribute('aria-current', 'true'); }
+      const m = s.marcacoes[q.key] || {};
+      const flags = (m.revisar ? '🚩' : '') + (m.chute ? '🎲' : '');
+      b.innerHTML = `${i + 1}${flags ? `<span class="flags">${flags}</span>` : ''}`;
+      b.title = `${P.rotulo(q)} — ${resp ? 'respondida' : 'pendente'}${m.revisar ? ' · revisar' : ''}${m.chute ? ' · chute' : ''}`;
+      b.addEventListener('click', () => irPara(i, true));
+      els.questionMap.appendChild(b);
+    });
+  }
+
+  /* Cronômetro */
+  let relogio = null;
+  function iniciarRelogio() { pararRelogio(); relogio = setInterval(tick, 1000); }
+  function pararRelogio() { if (relogio) clearInterval(relogio); relogio = null; }
+
+  function tick() {
+    const s = app.sessao;
+    if (!s || s.status !== 'andamento' || app.pausado || document.hidden || els.stepQuiz.classList.contains('hidden')) return;
+    const q = qAtual();
+    s.tempoTotal = (s.tempoTotal || 0) + 1;
+    s.tempos[q.key] = (s.tempos[q.key] || 0) + 1;
+    atualizarRelogios();
+    agendarSalvamento();
+  }
+
+  function atualizarRelogios() {
+    const s = app.sessao;
+    const q = qAtual();
+    const t = s.tempos[q.key] || 0;
+    const meta = s.config.metaSegundos;
+    els.timerTotal.textContent = `⏱ ${fmtTempo(s.tempoTotal)}`;
+    els.timerQuestion.textContent = `Nesta: ${fmtTempo(t)}${meta ? ` / ${fmtTempo(meta)}` : ''}`;
+    els.timerQuestion.classList.toggle('over', !!meta && t > meta);
+    els.timerQuestion.title = meta ? `Meta: ${fmtTempo(meta)} por questão` : 'Tempo nesta questão';
+  }
+
+  /* Pausa */
+  function alternarPausa(forcar) {
+    app.pausado = typeof forcar === 'boolean' ? forcar : !app.pausado;
+    els.pauseOverlay.classList.toggle('hidden', !app.pausado);
+    els.btnPause.textContent = app.pausado ? '▶ Continuar' : '⏸ Pausar';
+    els.btnPause.setAttribute('aria-pressed', app.pausado);
+  }
+  els.btnPause.addEventListener('click', () => alternarPausa());
+  els.btnUnpause.addEventListener('click', () => alternarPausa(false));
+
+  /* Sair (progresso fica salvo) */
+  els.btnQuit.addEventListener('click', async () => {
+    if (!confirm('Sair do simulado? O progresso fica salvo e você pode continuar depois pela tela inicial.')) return;
+    await salvarAgora();
+    pararRelogio();
+    app.sessao = null;
+    mostrarEtapa('import');
+    verificarSessaoPendente();
+  });
+
+  /* Finalizar */
+  els.btnFinish.addEventListener('click', async () => {
+    const s = app.sessao;
+    const pend = s.questoes.filter(q => !estaRespondida(q)).length;
+    if (pend && !confirm(`Ainda há ${plural(pend, 'questão sem resposta', 'questões sem resposta')}. Elas contarão como "em branco". Finalizar mesmo assim?`)) return;
+    pararRelogio();
+    s.status = 'finalizada';
+    s.finalizadoEm = new Date().toISOString();
+    app.resumo = calcularResumo(s);
+    app.filtro = 'todas';
+    try {
+      await Repo.registrarResultado(app.resumo);
+      await Repo.excluirSessao(s.id);
+    } catch (e) {
+      console.error(e);
+      toast('⚠ Não foi possível salvar no histórico.');
+    }
+    mostrarResultado();
+    renderizarHistorico();
+  });
+
+  /* =========================================================
+     MÓDULO 9 — RESULTADO
+     ========================================================= */
+  function calcularResumo(s) {
+    const itens = s.questoes.map(q => ({ q, sit: situacao(q, s), chute: !!(s.marcacoes[q.key] || {}).chute }));
+    const conta = sit => itens.filter(i => i.sit === sit).length;
+    const acertos = conta('certa'), erros = conta('errada'), brancos = conta('branco');
+    const consideradas = acertos + erros + brancos;
+    const chutes = itens.filter(i => i.chute && (i.sit === 'certa' || i.sit === 'errada'));
+    const ce = itens.filter(i => i.q.tipo === 'ce' && ['certa', 'errada', 'branco'].includes(i.sit));
+    const liquido = ce.length ? ce.filter(i => i.sit === 'certa').length - ce.filter(i => i.sit === 'errada').length : null;
+
+    const porModulo = [];
+    if (s.questoes.some(q => q.modulo)) {
+      const grupos = new Map();
+      itens.forEach(i => {
+        const nome = i.q.modulo || 'Sem módulo';
+        if (!grupos.has(nome)) grupos.set(nome, { nome, total: 0, acertos: 0, erros: 0, brancos: 0 });
+        const g = grupos.get(nome);
+        if (i.sit === 'certa') g.acertos++;
+        if (i.sit === 'errada') g.erros++;
+        if (i.sit === 'branco') g.brancos++;
+        if (['certa', 'errada', 'branco'].includes(i.sit)) g.total++;
+      });
+      grupos.forEach(g => porModulo.push({ ...g, percentual: g.total ? Math.round(g.acertos / g.total * 100) : 0 }));
+    }
+
+    // Documento salvo no histórico (resumo, sem o texto das questões)
+    return {
+      id: s.id,
+      titulo: s.titulo,
+      data: s.finalizadoEm,
+      modo: s.config.modo,
+      total: s.questoes.length,
+      consideradas, acertos, erros, brancos,
+      anuladas: conta('anulada'),
+      semGabarito: conta('sem-gabarito'),
+      percentual: consideradas ? Math.round(acertos / consideradas * 100) : 0,
+      itensCE: ce.length,
+      liquidoCE: liquido,
+      chutes: chutes.length,
+      chutesCertos: chutes.filter(i => i.sit === 'certa').length,
+      tempoTotal: s.tempoTotal || 0,
+      porModulo
+    };
+  }
+
+  const classePct = p => p >= 70 ? 'bom' : p < 50 ? 'ruim' : '';
+
+  function mostrarResultado() {
+    const s = app.sessao;
+    const r = app.resumo;
+    mostrarEtapa('result');
+
+    els.resultTitle.textContent = `Resultado — ${s.titulo}`;
+    const caixas = [
+      ['correct', r.acertos, 'Acertos'],
+      ['wrong', r.erros, 'Erros'],
+      ...(r.brancos ? [['blank', r.brancos, 'Em branco']] : []),
+      ['percent', `${r.percentual}%`, 'Aproveitamento'],
+      ...(r.liquidoCE !== null ? [['net', r.liquidoCE, `Nota líquida C/E (de ${r.itensCE})`]] : []),
+      ['', fmtTempo(r.tempoTotal), 'Tempo total']
+    ];
+    els.scoreSummary.innerHTML = caixas.map(([c, n, l]) =>
+      `<div class="score-box ${c}"><span class="num">${esc(n)}</span><span class="label">${esc(l)}</span></div>`).join('');
+
+    const extra = [];
+    if (r.consideradas) extra.push(`Tempo médio: <strong>${fmtTempo(r.tempoTotal / r.total)}</strong> por questão` +
+      (s.config.metaSegundos ? ` (meta: ${fmtTempo(s.config.metaSegundos)})` : '') + '.');
+    if (r.chutes) {
+      const certeza = r.acertos - r.chutesCertos;
+      extra.push(`🎲 Você marcou <strong>${plural(r.chutes, 'chute', 'chutes')}</strong> e acertou ${r.chutesCertos}. ` +
+        `Acertos com segurança: <strong>${certeza}</strong> (${r.consideradas ? Math.round(certeza / r.consideradas * 100) : 0}%).`);
+    }
+    if (r.liquidoCE !== null) extra.push('Nota líquida C/E: cada item errado anula um certo; itens em branco não contam.');
+    if (r.anuladas) extra.push(`${plural(r.anuladas, 'questão anulada ficou', 'questões anuladas ficaram')} fora da contagem.`);
+    if (r.semGabarito) extra.push(`${plural(r.semGabarito, 'questão sem gabarito ficou', 'questões sem gabarito ficaram')} fora da contagem.`);
+    els.resultExtra.innerHTML = extra.map(t => `<p>${t}</p>`).join('');
+
+    if (r.porModulo.length) {
+      els.moduleTableWrap.innerHTML = `
+        <h3 class="field-label" style="margin-bottom:6px">Desempenho por módulo</h3>
+        <div class="table-scroll"><table class="data-table">
+          <thead><tr><th>Módulo</th><th class="num">Acertos</th><th class="num">Erros</th><th class="num">Branco</th><th class="num">Aproveitamento</th></tr></thead>
+          <tbody>${r.porModulo.map(m => `
+            <tr><td>${esc(m.nome)}</td><td class="num">${m.acertos}/${m.total}</td><td class="num">${m.erros}</td><td class="num">${m.brancos}</td>
+            <td class="num"><span class="pct-bar ${classePct(m.percentual)}"><i style="width:${m.percentual}%"></i></span>${m.percentual}%</td></tr>`).join('')}
+          </tbody></table></div>`;
+    } else {
+      els.moduleTableWrap.innerHTML = '';
+    }
+
+    const nErradas = s.questoes.filter(q => ['errada', 'branco'].includes(situacao(q))).length;
+    const nErrChute = s.questoes.filter(q => ['errada', 'branco'].includes(situacao(q)) || (s.marcacoes[q.key] || {}).chute).length;
+    els.btnRedoWrong.disabled = !nErradas;
+    els.btnRedoWrong.textContent = `Refazer erradas (${nErradas})`;
+    els.btnRedoWrongGuess.disabled = !nErrChute;
+    els.btnRedoWrongGuess.textContent = `Refazer erradas + chutes (${nErrChute})`;
+
+    els.shuffleNote.classList.toggle('hidden', !Object.keys(s.ordemAlt || {}).length);
+    renderizarFiltros();
+    renderizarListaResultado();
+  }
+
+  const FILTROS = [
+    ['todas', 'Todas', () => true],
+    ['erradas', 'Erradas/branco', q => ['errada', 'branco'].includes(situacao(q))],
+    ['certas', 'Certas', q => situacao(q) === 'certa'],
+    ['chutes', '🎲 Chutes', q => (app.sessao.marcacoes[q.key] || {}).chute],
+    ['revisar', '🚩 Revisar', q => (app.sessao.marcacoes[q.key] || {}).revisar]
+  ];
+
+  function renderizarFiltros() {
+    els.resultFilters.innerHTML = '';
+    FILTROS.forEach(([id, nome, fn]) => {
+      const n = app.sessao.questoes.filter(fn).length;
+      if (id !== 'todas' && !n) return;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', app.filtro === id);
+      b.textContent = `${nome} (${n})`;
+      b.addEventListener('click', () => { app.filtro = id; renderizarFiltros(); renderizarListaResultado(); });
+      els.resultFilters.appendChild(b);
+    });
+  }
+
+  const ROTULO_SIT = { certa: 'Acertou', errada: 'Errou', branco: 'Em branco', anulada: 'Anulada', 'sem-gabarito': 'Sem gabarito' };
+
+  function renderizarListaResultado() {
+    const s = app.sessao;
+    const fn = (FILTROS.find(f => f[0] === app.filtro) || FILTROS[0])[2];
+    const lista = s.questoes.filter(fn);
+    els.resultList.innerHTML = lista.length ? '' : '<p class="empty-list">Nenhuma questão neste filtro.</p>';
+
+    lista.forEach(q => {
+      const g = q.gabarito;
+      const resp = s.respostas[q.key];
+      const sit = situacao(q);
+      const m = s.marcacoes[q.key] || {};
+      const embaralhada = s.ordemAlt[q.key] && resp && rotuloNaTela(q, resp) !== resp;
+
+      const opcoes = LETRAS.split('').filter(l => q.alternativas[l]).map(l => {
+        let cls = 'opt';
+        if (g && g.resposta === l) cls += ' correct';
+        if (resp === l && (!g || g.resposta !== l)) cls += ' wrong';
+        return `<div class="${cls}">(${l}) ${esc(q.alternativas[l])}</div>`;
+      }).join('');
+
+      const comentario = g
+        ? (g.resposta === 'X'
+          ? `<div class="comment"><strong>Questão anulada.</strong> ${esc(g.comentario)}</div>`
+          : `<div class="comment"><strong>Gabarito:</strong> (${esc(nomeResposta(q, g.resposta))})${g.comentario ? ' — ' + esc(g.comentario) : ''}</div>`)
+        : '<div class="comment"><em>Sem gabarito disponível.</em></div>';
+
+      const item = document.createElement('div');
+      item.className = `result-item ${sit}`;
+      item.innerHTML = `
+        <h3>
+          <span class="badge ${sit}">${ROTULO_SIT[sit]}</span>
+          <span>Questão ${q.numero}${q.modulo ? ` · ${esc(q.modulo)}` : ''} — Sua resposta: (${esc(resp ? nomeResposta(q, resp) : '—')})${embaralhada ? ` <span class="item-meta">[na tela: (${rotuloNaTela(q, resp)})]</span>` : ''}</span>
+          ${m.chute ? '<span title="Chute">🎲</span>' : ''}${m.revisar ? '<span title="Marcada para revisar">🚩</span>' : ''}
+          <span class="item-meta">⏱ ${fmtTempo(s.tempos[q.key] || 0)}</span>
+        </h3>
+        ${q.comando ? `<div class="comando">${esc(q.comando)}</div>` : ''}
+        <div class="enunciado">${esc(q.enunciado)}</div>
+        <div class="result-options">${opcoes}</div>
+        ${comentario}`;
+      els.resultList.appendChild(item);
+    });
+  }
+
+  function textoResultado() {
+    const s = app.sessao, r = app.resumo;
+    let t = `=== ${s.titulo} ===\n`;
+    t += `Data: ${fmtData(r.data)} · Modo: ${r.modo}\n`;
+    t += `Acertos: ${r.acertos} · Erros: ${r.erros} · Em branco: ${r.brancos} · Aproveitamento: ${r.percentual}%\n`;
+    if (r.liquidoCE !== null) t += `Nota líquida C/E: ${r.liquidoCE} (de ${r.itensCE} itens)\n`;
+    t += `Tempo total: ${fmtTempo(r.tempoTotal)}\n`;
+    if (r.porModulo.length) {
+      t += '\nPor módulo:\n';
+      r.porModulo.forEach(m => { t += `- ${m.nome}: ${m.acertos}/${m.total} (${m.percentual}%)\n`; });
+    }
+    t += '\n=== GABARITO COMENTADO ===\n\n';
+    s.questoes.forEach(q => {
+      const g = q.gabarito, resp = s.respostas[q.key], m = s.marcacoes[q.key] || {};
+      t += `Questão ${q.numero}${q.modulo ? ` (${q.modulo})` : ''} - Sua resposta: (${resp ? nomeResposta(q, resp) : '—'}) [${ROTULO_SIT[situacao(q)].toUpperCase()}]`;
+      t += `${m.chute ? ' [CHUTE]' : ''}${m.revisar ? ' [REVISAR]' : ''}\n`;
+      if (q.comando) t += `${q.comando}\n`;
+      t += `${q.enunciado}\n\n`;
+      if (q.tipo === 'multipla') LETRAS.split('').filter(l => q.alternativas[l]).forEach(l => { t += `(${l}) ${q.alternativas[l]}\n`; });
+      t += '\n';
+      t += g ? `Gabarito: (${nomeResposta(q, g.resposta)}) — ${g.comentario || ''}\n` : 'Gabarito: sem gabarito disponível.\n';
+      t += '----------------------------------------\n\n';
+    });
+    return t;
+  }
+
+  els.btnCopyResult.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(textoResultado());
+      toast('✅ Gabarito copiado!');
+    } catch (e) {
+      console.error(e);
+      toast('Não foi possível copiar — use "Baixar .txt".');
+    }
+  });
+
+  els.btnDownloadResult.addEventListener('click', () => {
+    const data = new Date().toISOString().slice(0, 10);
+    const nome = `${app.sessao.titulo}`.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '').slice(0, 60);
+    baixarArquivo(`resultado-${nome || 'simulado'}-${data}.txt`, textoResultado());
+  });
+
+  function refazer(tipo) {
+    const s = app.sessao;
+    let qs = s.questoes;
+    if (tipo === 'erradas') qs = qs.filter(q => ['errada', 'branco'].includes(situacao(q)));
+    if (tipo === 'erradas-chutes') qs = qs.filter(q => ['errada', 'branco'].includes(situacao(q)) || (s.marcacoes[q.key] || {}).chute);
+    if (!qs.length) { toast('Nenhuma questão nesse filtro.'); return; }
+    const titulo = tipo === 'todas' ? s.titulo : `${s.titulo.replace(/ — revisão$/, '')} — revisão`;
+    iniciarSimulado(clonar(qs), { titulo, config: { ...s.config } });
+  }
+  els.btnRedoAll.addEventListener('click', () => refazer('todas'));
+  els.btnRedoWrong.addEventListener('click', () => refazer('erradas'));
+  els.btnRedoWrongGuess.addEventListener('click', () => refazer('erradas-chutes'));
+
+  els.btnNew.addEventListener('click', () => {
+    app.sessao = null;
+    app.resumo = null;
+    mostrarEtapa('import');
+    verificarSessaoPendente();
+  });
+
+  /* =========================================================
+     MÓDULO 10 — HISTÓRICO E BACKUP
+     ========================================================= */
+  async function renderizarHistorico() {
+    let h = [];
+    try { h = await Repo.listarHistorico(15); } catch (e) { console.error(e); }
+    if (!h.length) {
+      els.historyList.innerHTML = '<p class="empty-list">Nenhum simulado finalizado ainda.</p>';
+      return;
+    }
+    els.historyList.innerHTML = `
+      <div class="table-scroll"><table class="data-table">
+        <thead><tr><th>Data</th><th>Simulado</th><th>Modo</th><th class="num">Acertos</th><th class="num">%</th><th class="num">Tempo</th></tr></thead>
+        <tbody>${h.map(r => `
+          <tr>
+            <td>${esc(fmtData(r.data))}</td>
+            <td>${esc(r.titulo)}${r.liquidoCE !== null && r.liquidoCE !== undefined ? ` <span class="muted">· líquida C/E: ${r.liquidoCE}</span>` : ''}</td>
+            <td>${esc(r.modo)}</td>
+            <td class="num">${r.acertos}/${r.consideradas}</td>
+            <td class="num"><span class="pct-bar ${classePct(r.percentual)}"><i style="width:${r.percentual}%"></i></span>${r.percentual}%</td>
+            <td class="num">${fmtTempo(r.tempoTotal)}</td>
+          </tr>`).join('')}
+        </tbody></table></div>`;
+  }
+
+  els.btnClearHistory.addEventListener('click', async () => {
+    if (!confirm('Apagar todo o histórico de simulados? Esta ação não pode ser desfeita.')) return;
+    await Repo.limparHistorico();
+    renderizarHistorico();
+    toast('Histórico apagado.');
+  });
+
+  els.btnExportBackup.addEventListener('click', async () => {
+    const dados = await Repo.exportarBackup();
+    baixarArquivo(`simulado-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(dados, null, 2), 'application/json');
+  });
+
+  els.fileBackup.addEventListener('change', async () => {
+    const f = els.fileBackup.files[0];
+    els.fileBackup.value = '';
+    if (!f) return;
+    try {
+      const dados = JSON.parse(await f.text());
+      if (!confirm('Importar este backup? Registros com o mesmo identificador serão substituídos.')) return;
+      await Repo.importarBackup(dados);
+      app.prefs = await Repo.carregarPreferencias();
+      if (app.prefs.tema) aplicarTema(app.prefs.tema);
+      await renderizarHistorico();
+      await verificarSessaoPendente();
+      toast('✅ Backup importado.');
+    } catch (e) {
+      console.error(e);
+      toast('⚠ ' + (e.message || 'Arquivo inválido.'));
+    }
+  });
+
+  /* =========================================================
+     MÓDULO 11 — MODAIS E TECLADO
+     ========================================================= */
+  let focoAntesModal = null;
+  function abrirModal(el) {
+    focoAntesModal = document.activeElement;
+    el.classList.remove('hidden');
+    const btn = el.querySelector('[data-close-modal]');
+    if (btn) btn.focus();
+  }
+  function fecharModais() {
+    document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden'));
+    if (focoAntesModal && focoAntesModal.focus) focoAntesModal.focus();
+  }
+  const modalAberto = () => !!document.querySelector('.modal-overlay:not(.hidden)');
+
+  document.querySelectorAll('[data-close-modal]').forEach(b => b.addEventListener('click', fecharModais));
+  document.querySelectorAll('.modal-overlay').forEach(m =>
+    m.addEventListener('click', e => { if (e.target === m) fecharModais(); }));
+
+  function abrirTexto(q) {
+    if (!q.textoBase) return;
+    const tb = q.textoBase;
+    els.modalTextTitle.textContent = `Texto (questões ${tb.de === tb.ate ? tb.de : `${tb.de} a ${tb.ate}`})`;
+    els.modalTextBody.innerHTML = paragrafosHtml(tb.texto);
+    abrirModal(els.textModal);
+    els.modalTextBody.scrollTop = 0;
+  }
+  els.btnShowText.addEventListener('click', () => abrirTexto(qAtual()));
+  els.btnHelp.addEventListener('click', () => abrirModal(els.helpModal));
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { if (modalAberto()) fecharModais(); return; }
+    if (modalAberto()) return;
+    if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === '?') { e.preventDefault(); abrirModal(els.helpModal); return; }
+    if (!app.sessao || els.stepQuiz.classList.contains('hidden')) return;
+
+    const k = e.key.toLowerCase();
+    if (k === 'p') { e.preventDefault(); alternarPausa(); return; }
+    if (app.pausado) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); irPara(app.sessao.indiceAtual + 1); return; }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); irPara(app.sessao.indiceAtual - 1); return; }
+
+    const q = qAtual();
+    const ops = opcoesExibicao(q);
+    let alvo = null;
+    if (/^[a-e]$/.test(k)) alvo = ops.find(o => o.rotulo === k.toUpperCase());
+    else if (/^[1-5]$/.test(k)) alvo = ops[parseInt(k, 10) - 1];
+    if (alvo) {
+      e.preventDefault();
+      if (e.shiftKey) alternarRisco(alvo.orig); else selecionar(alvo.orig);
+      return;
+    }
+    if (k === 't' && q.textoBase) { e.preventDefault(); abrirTexto(q); return; }
+    if (k === 'r') { e.preventDefault(); alternarMarcacao('revisar'); return; }
+    if (k === 'g') { e.preventDefault(); alternarMarcacao('chute'); }
+  });
+
+  /* =========================================================
+     MÓDULO 12 — INICIALIZAÇÃO
+     ========================================================= */
+  async function init() {
+    // ► Para migrar para Firebase, troque SÓ esta linha (veja o modelo no fim de storage.js)
+    const adapter = new LocalStorageAdapter({ namespace: 'simulado-interativo' });
+    Repo.usar(adapter);
+
+    if (!adapter.persistente) {
+      els.storageNote.textContent = '⚠ O navegador bloqueou o armazenamento local: o progresso e o histórico valem só enquanto a página estiver aberta.';
+    } else {
+      els.storageNote.textContent = 'Progresso e histórico ficam salvos neste navegador. Use "Exportar backup" para levá-los a outro lugar.';
+    }
+
+    try { app.prefs = await Repo.carregarPreferencias(); } catch (e) { app.prefs = {}; }
+    const temaSistema = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'escuro' : 'claro';
+    aplicarTema(app.prefs.tema || temaSistema);
+    aplicarConfigNaTela(app.prefs.ultimaConfig);
+    if (app.prefs.rascunho) {
+      els.inputQuestions.value = app.prefs.rascunho.questoes || '';
+      els.inputGabarito.value = app.prefs.rascunho.gabarito || '';
+    }
+
+    atualizarStatusImportacao();
+    await verificarSessaoPendente();
+    await renderizarHistorico();
+  }
+
+  init();
+})();

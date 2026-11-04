@@ -3,109 +3,262 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
 <title>Simulado Interativo</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="container">
-  <header>
-    <h1>📝 Simulado Interativo</h1>
-    <p>Importe as questões e o gabarito, e comece a estudar.</p>
+<div class="container" id="app-container">
+  <header class="topbar">
+    <div>
+      <h1>📝 Simulado Interativo</h1>
+      <p class="subtitle">Importe as questões e o gabarito, e comece a estudar.</p>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" class="btn-icon" id="btn-help" title="Atalhos de teclado (?)" aria-label="Atalhos de teclado">⌨️</button>
+      <button type="button" class="btn-icon" id="btn-theme" title="Alternar tema claro/escuro" aria-label="Alternar tema">🌙</button>
+    </div>
   </header>
 
+  <!-- ================= ETAPA 1 — IMPORTAÇÃO ================= -->
   <section id="step-import">
-    <div class="card">
-      <h2>1. Cole as questões</h2>
-      <p class="hint">Cabeçalhos de módulo são ignorados; texto-base vale apenas para o intervalo declarado.</p>
-      <textarea id="input-questions" placeholder="Cole aqui as questões..."></textarea>
-      <div id="status-questions" class="status empty">Nenhuma questão importada.</div>
+    <div class="card card-resume hidden" id="resume-card">
+      <div>
+        <h2>⏯ Simulado em andamento</h2>
+        <p id="resume-info" class="hint"></p>
+      </div>
+      <div class="btn-group">
+        <button type="button" class="btn-secondary" id="btn-discard">Descartar</button>
+        <button type="button" class="btn-primary" id="btn-resume">Continuar</button>
+      </div>
     </div>
+
     <div class="card">
-      <h2>2. Cole o gabarito comentado</h2>
-      <p class="hint">Formato: "N. LETRA — Comentário" (uma linha por questão).</p>
-      <textarea id="input-gabarito" placeholder="Cole aqui o gabarito comentado..."></textarea>
-      <div id="status-gabarito" class="status empty">Nenhum gabarito importado.</div>
+      <div class="card-head">
+        <h2>1. Cole as questões</h2>
+        <label class="btn-secondary btn-small btn-file" tabindex="0" role="button">📂 Abrir .txt
+          <input type="file" id="file-questions" accept=".txt,.md,text/plain" hidden>
+        </label>
+      </div>
+      <p class="hint">Aceita múltipla escolha — <code>(A)</code>, <code>A)</code> ou <code>a)</code> — e itens Certo/Errado. Cabeçalhos "MÓDULO" viram assuntos no resultado; o texto-base vale para o intervalo declarado. Você também pode arrastar um arquivo .txt para a caixa.</p>
+      <textarea id="input-questions" placeholder="Cole aqui as questões..." spellcheck="false"></textarea>
+      <div id="status-questions" class="status empty" role="status">Nenhuma questão importada.</div>
     </div>
+
     <div class="card">
+      <div class="card-head">
+        <h2>2. Cole o gabarito comentado</h2>
+        <label class="btn-secondary btn-small btn-file" tabindex="0" role="button">📂 Abrir .txt
+          <input type="file" id="file-gabarito" accept=".txt,.md,text/plain" hidden>
+        </label>
+      </div>
+      <p class="hint">Formatos aceitos: <code>1. C — Comentário</code>, <code>1) Certo - ...</code>, <code>Questão 1: E</code>, <code>1. Anulada</code> ou compacto <code>1-A 2-C 3-E</code>.</p>
+      <textarea id="input-gabarito" placeholder="Cole aqui o gabarito comentado..." spellcheck="false"></textarea>
+      <div id="status-gabarito" class="status empty" role="status">Nenhum gabarito importado.</div>
+    </div>
+
+    <div class="card card-warn hidden" id="import-warnings" role="alert"></div>
+
+    <div class="card">
+      <h2>3. Configure</h2>
+      <div class="config-grid">
+        <label class="field">
+          <span class="field-label">Nome do simulado (opcional)</span>
+          <input type="text" id="input-title" placeholder="Ex.: Banco de Dados — bateria 3">
+        </label>
+        <label class="field">
+          <span class="field-label">Meta por questão (minutos · 0 = sem meta)</span>
+          <input type="number" id="opt-meta" min="0" max="60" step="0.5" value="3">
+        </label>
+        <fieldset class="field">
+          <legend class="field-label">Modo</legend>
+          <label class="radio"><input type="radio" name="modo" value="prova" checked> <span><strong>Prova</strong> — gabarito só no final</span></label>
+          <label class="radio"><input type="radio" name="modo" value="estudo"> <span><strong>Estudo</strong> — correção e comentário a cada questão</span></label>
+        </fieldset>
+        <fieldset class="field">
+          <legend class="field-label">Opções</legend>
+          <label class="check"><input type="checkbox" id="opt-shuffle-q"> Embaralhar questões</label>
+          <label class="check"><input type="checkbox" id="opt-shuffle-alt"> Embaralhar alternativas</label>
+        </fieldset>
+      </div>
       <div class="actions">
-        <div style="display:flex;gap:12px;flex-wrap:wrap">
-          <button class="btn-secondary" id="btn-example">Carregar exemplo</button>
-          <button class="btn-secondary" id="btn-recheck">🔄 Re-verificar</button>
+        <div class="btn-group">
+          <button type="button" class="btn-secondary" id="btn-example">Carregar exemplo</button>
+          <button type="button" class="btn-secondary" id="btn-clear">Limpar</button>
         </div>
-        <button class="btn-primary" id="btn-start" disabled>Iniciar Simulado</button>
+        <button type="button" class="btn-primary" id="btn-start" disabled>Iniciar Simulado</button>
       </div>
     </div>
-  </section>
 
-  <section id="step-quiz" class="hidden">
     <div class="card">
-      <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
-
-      <div class="question-meta">
-        <span id="question-counter">Questão 1 de N</span>
-        <span class="right">
-          <span id="question-score">Acertos: 0</span>
-          <button class="btn-toggle" id="btn-toggle-score" title="Ocultar/Mostrar acertos">👁️ Ocultar</button>
-        </span>
-      </div>
-
-      <div id="text-base-container" class="text-base hidden"></div>
-      <div class="question-text" id="question-text"></div>
-      <div class="options" id="options-container"></div>
-
-      <div class="actions" style="margin-top:24px">
-        <div style="display:flex;gap:12px;flex-wrap:wrap">
-          <button class="btn-secondary" id="btn-quit">Sair</button>
-          <button class="btn-secondary" id="btn-prev" disabled>← Voltar</button>
-        </div>
-        <div style="display:flex;gap:12px;flex-wrap:wrap">
-          <button class="btn-secondary" id="btn-next">Próxima →</button>
-          <button class="btn-primary" id="btn-finish" disabled>Finalizar ✓</button>
+      <div class="card-head">
+        <h2>📊 Histórico</h2>
+        <div class="btn-group">
+          <button type="button" class="btn-secondary btn-small" id="btn-export-backup">⬇ Exportar backup</button>
+          <label class="btn-secondary btn-small btn-file" tabindex="0" role="button">⬆ Importar backup
+            <input type="file" id="file-backup" accept=".json,application/json" hidden>
+          </label>
+          <button type="button" class="btn-secondary btn-small btn-danger-text" id="btn-clear-history">Limpar</button>
         </div>
       </div>
-    </div>
-
-    <div class="card unanswered-card">
-      <h2>Questões não respondidas <span class="unanswered-count" id="unanswered-count">(0)</span></h2>
-      <p class="hint">Clique em uma questão para ir direto até ela.</p>
-      <div class="unanswered-list" id="unanswered-list"></div>
+      <div id="history-list"></div>
+      <p class="hint storage-note" id="storage-note"></p>
     </div>
   </section>
 
+  <!-- ================= ETAPA 2 — QUESTIONÁRIO ================= -->
+  <section id="step-quiz" class="hidden">
+    <div class="quiz-layout" id="quiz-layout">
+      <aside class="card text-side" id="text-side" aria-label="Texto-base">
+        <h3 id="text-side-title">Texto-base</h3>
+        <div id="text-side-body" class="text-body"></div>
+      </aside>
+
+      <div class="quiz-main">
+        <div class="card question-card" id="question-card">
+          <div class="progress-bar" role="progressbar" aria-label="Questões respondidas" aria-valuemin="0" aria-valuemax="100" id="progress-bar">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+
+          <div class="question-meta">
+            <div>
+              <strong id="question-counter">Questão 1 de N</strong>
+              <span class="muted" id="question-origin"></span>
+            </div>
+            <div class="meta-right">
+              <span class="timer" id="timer-total" title="Tempo total"></span>
+              <span class="timer" id="timer-question"></span>
+              <span id="question-score">Acertos: 0</span>
+              <button type="button" class="btn-toggle" id="btn-toggle-score">👁️ Ocultar</button>
+            </div>
+          </div>
+
+          <div class="question-tools">
+            <button type="button" class="btn-chip" id="btn-flag-review" aria-pressed="false" title="Marcar para revisar (R)">🚩 Revisar</button>
+            <button type="button" class="btn-chip" id="btn-flag-guess" aria-pressed="false" title="Marcar como chute (G)">🎲 Chutei</button>
+            <button type="button" class="btn-chip" id="btn-pause" title="Pausar o cronômetro (P)">⏸ Pausar</button>
+          </div>
+
+          <div id="comando-container" class="comando hidden"></div>
+
+          <div id="text-base-container" class="text-base hidden">
+            <span id="text-base-label"></span>
+            <button type="button" class="btn-primary btn-small btn-show-text" id="btn-show-text">Mostrar texto (T)</button>
+          </div>
+
+          <div class="question-text" id="question-text"></div>
+          <div class="options" id="options-container" role="radiogroup" aria-labelledby="question-text"></div>
+          <div id="feedback" class="feedback hidden" aria-live="polite"></div>
+
+          <div class="actions quiz-nav">
+            <div class="btn-group">
+              <button type="button" class="btn-secondary" id="btn-quit">Sair</button>
+              <button type="button" class="btn-secondary" id="btn-prev">← Voltar</button>
+            </div>
+            <div class="btn-group">
+              <button type="button" class="btn-secondary" id="btn-next">Próxima →</button>
+              <button type="button" class="btn-primary" id="btn-finish">Finalizar ✓</button>
+            </div>
+          </div>
+
+          <div class="pause-overlay hidden" id="pause-overlay">
+            <div>
+              <p>⏸ Simulado pausado</p>
+              <button type="button" class="btn-primary" id="btn-unpause">Continuar (P)</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Mapa de questões <span class="muted" id="map-pending"></span></h2>
+          <div class="map-legend">
+            <span><i class="lg lg-current"></i>Atual</span>
+            <span><i class="lg lg-answered"></i>Respondida</span>
+            <span><i class="lg lg-pending"></i>Pendente</span>
+            <span>🚩 Revisar</span>
+            <span>🎲 Chute</span>
+            <span class="only-study"><i class="lg lg-right"></i>Certa</span>
+            <span class="only-study"><i class="lg lg-wrong"></i>Errada</span>
+          </div>
+          <div class="question-map" id="question-map"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ETAPA 3 — RESULTADO ================= -->
   <section id="step-result" class="hidden">
     <div class="card">
-      <h2 style="margin-bottom:16px">Resultado Final</h2>
+      <h2 id="result-title">Resultado Final</h2>
       <div class="score-summary" id="score-summary"></div>
-      <!-- Modificação aqui: Adicionado o botão de copiar -->
+      <div id="result-extra" class="result-extra"></div>
+      <div id="module-table-wrap"></div>
       <div class="actions">
-        <div style="display:flex; gap:12px; flex-wrap:wrap;">
-          <button class="btn-secondary" id="btn-restart">Refazer</button>
-          <button class="btn-primary" id="btn-new">Novo Simulado</button>
+        <div class="btn-group">
+          <button type="button" class="btn-secondary" id="btn-redo-all">Refazer tudo</button>
+          <button type="button" class="btn-secondary" id="btn-redo-wrong">Refazer erradas</button>
+          <button type="button" class="btn-secondary" id="btn-redo-wrong-guess">Refazer erradas + chutes</button>
+          <button type="button" class="btn-primary" id="btn-new">Novo Simulado</button>
         </div>
-        <button class="btn-secondary" id="btn-copy-result" title="Copiar Gabarito Comentado">📋 Copiar Gabarito</button>
+        <div class="btn-group">
+          <button type="button" class="btn-secondary" id="btn-copy-result">📋 Copiar</button>
+          <button type="button" class="btn-secondary" id="btn-download-result">⬇ Baixar .txt</button>
+        </div>
       </div>
     </div>
     <div class="card">
-      <h2 style="margin-bottom:16px">Gabarito Comentado</h2>
+      <div class="card-head">
+        <h2>Gabarito Comentado</h2>
+        <div class="result-filters" id="result-filters" role="tablist"></div>
+      </div>
+      <p class="hint hidden" id="shuffle-note">As alternativas foram exibidas embaralhadas; abaixo aparecem na ordem e com as letras originais.</p>
       <div id="result-list"></div>
     </div>
   </section>
 </div>
 
-<!-- Modal de Texto -->
-<div id="text-modal" class="modal-overlay hidden">
+<!-- Modal: texto-base -->
+<div id="text-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-text-title">
   <div class="modal-content">
     <div class="modal-header">
       <h3 id="modal-text-title">Texto</h3>
-      <button id="btn-close-modal" class="btn-close" aria-label="Fechar">&times;</button>
+      <button type="button" class="btn-close" data-close-modal aria-label="Fechar">&times;</button>
     </div>
-    <div id="modal-text-body" class="modal-body"></div>
+    <div id="modal-text-body" class="modal-body text-body"></div>
     <div class="modal-footer">
-      <button class="btn-primary" id="btn-close-modal-footer">Fechar</button>
+      <button type="button" class="btn-primary" data-close-modal>Fechar</button>
     </div>
   </div>
 </div>
 
+<!-- Modal: atalhos -->
+<div id="help-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="help-title">
+  <div class="modal-content modal-small">
+    <div class="modal-header">
+      <h3 id="help-title">⌨️ Atalhos de teclado</h3>
+      <button type="button" class="btn-close" data-close-modal aria-label="Fechar">&times;</button>
+    </div>
+    <div class="modal-body">
+      <table class="shortcuts">
+        <tr><td><kbd>A</kbd>–<kbd>E</kbd> ou <kbd>1</kbd>–<kbd>5</kbd></td><td>Marcar alternativa (em Certo/Errado: <kbd>C</kbd> / <kbd>E</kbd>)</td></tr>
+        <tr><td><kbd>Shift</kbd> + letra</td><td>Riscar / desriscar alternativa</td></tr>
+        <tr><td>Botão direito</td><td>Riscar / desriscar alternativa</td></tr>
+        <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Questão anterior / próxima</td></tr>
+        <tr><td><kbd>T</kbd></td><td>Abrir texto-base</td></tr>
+        <tr><td><kbd>R</kbd></td><td>Marcar para revisar</td></tr>
+        <tr><td><kbd>G</kbd></td><td>Marcar como chute</td></tr>
+        <tr><td><kbd>P</kbd></td><td>Pausar / continuar</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Fechar janelas</td></tr>
+        <tr><td><kbd>?</kbd></td><td>Mostrar esta ajuda</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="parser.js"></script>
+<script src="storage.js"></script>
 <script src="script.js"></script>
 </body>
 </html>
