@@ -37,7 +37,7 @@
   }
 
   function getCabecalhoTexto(txt) {
-    const m = txt.match(/(?:quest[õo]es?|questions?)(?:\s+de\s+n[úu]meros?)?\s+(\d+)(?:\s*(?:a|até|à|to|–|-|—)\s*(\d+))?/i);
+    const m = txt.match(/(?:quest[õo]es?|questions?)(?:\s+d[eo]s?(?:\s+n[úu]meros?)?)?\s+(\d+)(?:\s*(?:a|até|à|e|to|through|thru|and|–|-|—)\s*(\d+))?/i);
     if (m && /texto|trecho|considere|atenção|leia|text\b|read\b|responda|answer/i.test(txt)) {
       return {
         de: parseInt(m[1], 10),
