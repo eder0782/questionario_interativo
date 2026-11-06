@@ -15,6 +15,15 @@
       <p class="subtitle">Importe as questões e o gabarito, e comece a estudar.</p>
     </div>
     <div class="topbar-actions">
+      <div class="account hidden" id="account-area">
+        <button type="button" class="btn-secondary btn-small" id="btn-login" title="Sincronizar seus simulados entre dispositivos">🔐 Entrar com Google</button>
+        <div class="account-user hidden" id="account-user">
+          <img id="account-photo" alt="" referrerpolicy="no-referrer">
+          <span id="account-name" class="account-name"></span>
+          <button type="button" class="btn-secondary btn-small" id="btn-copy-uid" title="Copiar seu UID (usado nas regras do Firestore)">UID</button>
+          <button type="button" class="btn-secondary btn-small" id="btn-logout">Sair</button>
+        </div>
+      </div>
       <button type="button" class="btn-icon" id="btn-help" title="Atalhos de teclado (?)" aria-label="Atalhos de teclado">⌨️</button>
       <button type="button" class="btn-icon" id="btn-theme" title="Alternar tema claro/escuro" aria-label="Alternar tema">🌙</button>
     </div>
@@ -189,7 +198,13 @@
   <!-- ================= ETAPA 3 — RESULTADO ================= -->
   <section id="step-result" class="hidden">
     <div class="card">
-      <h2 id="result-title">Resultado Final</h2>
+      <div class="result-head">
+        <div>
+          <h2 id="result-title">Resultado Final</h2>
+          <p class="hint" id="result-date"></p>
+        </div>
+        <button type="button" class="btn-secondary btn-small hidden" id="btn-back-history">← Voltar ao histórico</button>
+      </div>
       <div class="score-summary" id="score-summary"></div>
       <div id="result-extra" class="result-extra"></div>
       <div id="module-table-wrap"></div>
@@ -257,6 +272,12 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+<!-- Firebase (SDK compat). Se não carregar, o app segue no modo local. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check-compat.js"></script>
+<script src="firebase-config.js"></script>
 <script src="parser.js"></script>
 <script src="storage.js"></script>
 <script src="script.js"></script>

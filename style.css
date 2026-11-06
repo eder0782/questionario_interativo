@@ -53,6 +53,18 @@ kbd { border-bottom-width: 2px }
 }
 .btn-icon:hover { border-color: var(--primary) }
 
+/* ---------- Conta ---------- */
+.topbar-actions { align-items: center }
+.account { display: flex; align-items: center; gap: 8px }
+.account-user { display: flex; align-items: center; gap: 8px }
+.account-user img { width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--primary-border); object-fit: cover }
+.account-user img[src=""], .account-user img:not([src]) { display: none }
+.account-name { font-size: .85rem; font-weight: 600; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+@media (max-width: 640px) {
+  .account-name, #btn-copy-uid { display: none }
+  .topbar { flex-wrap: wrap }
+}
+
 /* ---------- Cards e formulários ---------- */
 .card {
   background: var(--card); border-radius: 12px; padding: 24px;
@@ -284,6 +296,15 @@ button:disabled { opacity: .5; cursor: not-allowed }
 .empty-list { color: var(--muted); font-size: .9rem; padding: 10px 0 }
 
 /* ---------- Histórico ---------- */
+.hist-row { cursor: pointer; transition: background .12s }
+.hist-row:hover, .hist-row:focus-visible { background: var(--primary-soft); outline: none }
+.hist-actions { white-space: nowrap; text-align: right }
+.hist-open { color: var(--primary); font-weight: 600; font-size: .82rem; margin-right: 8px }
+.btn-row-del { padding: 4px 8px; background: transparent; font-size: .9rem; opacity: .55 }
+.btn-row-del:hover { opacity: 1; background: var(--danger-bg) }
+.result-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap }
+.result-head .hint { margin-bottom: 0 }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap }
 .storage-note { margin: 10px 0 0 }
 
 /* ---------- Modais ---------- */

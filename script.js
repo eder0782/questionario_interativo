@@ -97,6 +97,7 @@
     'btn-example', 'btn-clear', 'btn-start',
     'history-list', 'btn-export-backup', 'file-backup', 'btn-clear-history', 'storage-note',
     'btn-help', 'btn-theme',
+    'account-area', 'btn-login', 'account-user', 'account-photo', 'account-name', 'btn-copy-uid', 'btn-logout',
     'quiz-layout', 'text-side', 'text-side-title', 'text-side-body',
     'question-card', 'progress-bar', 'progress-fill', 'question-counter', 'question-origin',
     'timer-total', 'timer-question', 'question-score', 'btn-toggle-score',
@@ -106,7 +107,7 @@
     'btn-quit', 'btn-prev', 'btn-next', 'btn-finish',
     'pause-overlay', 'btn-unpause', 'map-pending', 'question-map',
     'result-title', 'score-summary', 'result-extra', 'module-table-wrap',
-    'btn-redo-all', 'btn-redo-wrong', 'btn-redo-wrong-guess', 'btn-new',
+    'btn-back-history', 'result-date', 'btn-redo-all', 'btn-redo-wrong', 'btn-redo-wrong-guess', 'btn-new',
     'btn-copy-result', 'btn-download-result', 'result-filters', 'shuffle-note', 'result-list',
     'text-modal', 'modal-text-title', 'modal-text-body', 'help-modal'
   ];
@@ -121,7 +122,8 @@
   // Agrupa várias mudanças seguidas (cliques, cronômetro) em uma gravação
   function agendarSalvamento() {
     if (tSalvar) return;
-    tSalvar = setTimeout(() => { tSalvar = null; salvarAgora(); }, 1500);
+    const intervalo = (Repo.adapter && Repo.adapter.intervaloSalvamento) || 1500;
+    tSalvar = setTimeout(() => { tSalvar = null; salvarAgora(); }, intervalo);
   }
 
   async function salvarAgora() {
@@ -384,6 +386,7 @@ MÓDULO 2
   async function verificarSessaoPendente() {
     let s = null;
     try { s = await Repo.carregarSessaoEmAndamento(); } catch (e) { console.error(e); }
+    if (s && app.sessao && s.id === app.sessao.id) s = null; // é o simulado aberto agora
     app.sessaoPendente = s;
     if (!s) { els.resumeCard.classList.add('hidden'); return; }
     const resp = s.questoes.filter(q => s.respostas[q.key]).length;
@@ -735,12 +738,19 @@ MÓDULO 2
     s.finalizadoEm = new Date().toISOString();
     app.resumo = calcularResumo(s);
     app.filtro = 'todas';
+    app.origemResultado = 'simulado';
     try {
       await Repo.registrarResultado(app.resumo);
       await Repo.excluirSessao(s.id);
     } catch (e) {
       console.error(e);
       toast('⚠ Não foi possível salvar no histórico.');
+    }
+    try {
+      await Repo.salvarDetalhes(s); // permite reabrir este resultado pelo histórico
+    } catch (e) {
+      console.error(e);
+      toast('⚠ Resumo salvo, mas sem espaço para guardar os detalhes. Exclua simulados antigos do histórico.');
     }
     mostrarResultado();
     renderizarHistorico();
@@ -801,6 +811,9 @@ MÓDULO 2
     mostrarEtapa('result');
 
     els.resultTitle.textContent = `Resultado — ${s.titulo}`;
+    const doHistorico = app.origemResultado === 'historico';
+    els.btnBackHistory.classList.toggle('hidden', !doHistorico);
+    els.resultDate.textContent = `Finalizado em ${fmtData(r.data)} · modo ${r.modo}`;
     const caixas = [
       ['correct', r.acertos, 'Acertos'],
       ['wrong', r.erros, 'Erros'],
@@ -960,8 +973,14 @@ MÓDULO 2
     baixarArquivo(`resultado-${nome || 'simulado'}-${data}.txt`, textoResultado());
   });
 
-  function refazer(tipo) {
+  async function refazer(tipo) {
     const s = app.sessao;
+    if (app.sessaoPendente) {
+      if (!confirm('Há um simulado em andamento salvo. Começar este vai descartá-lo. Continuar?')) return;
+      await Repo.excluirSessoesEmAndamento();
+      app.sessaoPendente = null;
+      els.resumeCard.classList.add('hidden');
+    }
     let qs = s.questoes;
     if (tipo === 'erradas') qs = qs.filter(q => ['errada', 'branco'].includes(situacao(q)));
     if (tipo === 'erradas-chutes') qs = qs.filter(q => ['errada', 'branco'].includes(situacao(q)) || (s.marcacoes[q.key] || {}).chute);
@@ -980,6 +999,15 @@ MÓDULO 2
     verificarSessaoPendente();
   });
 
+  els.btnBackHistory.addEventListener('click', () => {
+    app.sessao = null;
+    app.resumo = null;
+    mostrarEtapa('import');
+    verificarSessaoPendente();
+    const card = els.historyList.closest('.card');
+    if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start' });
+  });
+
   /* =========================================================
      MÓDULO 10 — HISTÓRICO E BACKUP
      ========================================================= */
@@ -992,18 +1020,54 @@ MÓDULO 2
     }
     els.historyList.innerHTML = `
       <div class="table-scroll"><table class="data-table">
-        <thead><tr><th>Data</th><th>Simulado</th><th>Modo</th><th class="num">Acertos</th><th class="num">%</th><th class="num">Tempo</th></tr></thead>
+        <thead><tr><th>Data</th><th>Simulado</th><th>Modo</th><th class="num">Acertos</th><th class="num">%</th><th class="num">Tempo</th><th><span class="sr-only">Ações</span></th></tr></thead>
         <tbody>${h.map(r => `
-          <tr>
+          <tr class="hist-row" data-id="${esc(r.id)}" tabindex="0" role="button" title="Ver detalhes deste simulado">
             <td>${esc(fmtData(r.data))}</td>
             <td>${esc(r.titulo)}${r.liquidoCE !== null && r.liquidoCE !== undefined ? ` <span class="muted">· líquida C/E: ${r.liquidoCE}</span>` : ''}</td>
             <td>${esc(r.modo)}</td>
             <td class="num">${r.acertos}/${r.consideradas}</td>
             <td class="num"><span class="pct-bar ${classePct(r.percentual)}"><i style="width:${r.percentual}%"></i></span>${r.percentual}%</td>
             <td class="num">${fmtTempo(r.tempoTotal)}</td>
+            <td class="hist-actions"><span class="hist-open">Ver ›</span><button type="button" class="btn-row-del" data-del="${esc(r.id)}" title="Excluir do histórico" aria-label="Excluir do histórico">🗑</button></td>
           </tr>`).join('')}
         </tbody></table></div>`;
   }
+
+  async function abrirDoHistorico(id) {
+    let det = null;
+    try { det = await Repo.carregarDetalhes(id); } catch (e) { console.error(e); }
+    if (!det) {
+      toast('Este simulado foi feito antes de o app guardar os detalhes — só o resumo está disponível.');
+      return;
+    }
+    app.sessao = det;
+    app.resumo = calcularResumo(det);
+    app.filtro = 'todas';
+    app.origemResultado = 'historico';
+    mostrarResultado();
+  }
+
+  els.historyList.addEventListener('click', async e => {
+    const del = e.target.closest('[data-del]');
+    if (del) {
+      e.stopPropagation();
+      if (!confirm('Excluir este simulado do histórico?')) return;
+      await Repo.excluirResultado(del.dataset.del);
+      renderizarHistorico();
+      toast('Simulado excluído do histórico.');
+      return;
+    }
+    const row = e.target.closest('.hist-row');
+    if (row) abrirDoHistorico(row.dataset.id);
+  });
+  els.historyList.addEventListener('keydown', e => {
+    const row = e.target.closest('.hist-row');
+    if (row && e.target === row && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      abrirDoHistorico(row.dataset.id);
+    }
+  });
 
   els.btnClearHistory.addEventListener('click', async () => {
     if (!confirm('Apagar todo o histórico de simulados? Esta ação não pode ser desfeita.')) return;
@@ -1099,29 +1163,159 @@ MÓDULO 2
   /* =========================================================
      MÓDULO 12 — INICIALIZAÇÃO
      ========================================================= */
-  async function init() {
-    // ► Para migrar para Firebase, troque SÓ esta linha (veja o modelo no fim de storage.js)
-    const adapter = new LocalStorageAdapter({ namespace: 'simulado-interativo' });
-    Repo.usar(adapter);
+  /* =========================================================
+     MÓDULO 12 — CONTA (Firebase) E INICIALIZAÇÃO
+     Sem login: dados no navegador (LocalStorageAdapter).
+     Com login Google: dados na nuvem (FirestoreAdapter).
+     ========================================================= */
+  const FB = window.SIMULADO_FIREBASE;
+  const fb = { auth: null, db: null, local: null, usuario: null };
 
-    if (!adapter.persistente) {
+  function atualizarNotaArmazenamento() {
+    const a = Repo.adapter;
+    if (a && a.tipo === 'nuvem') {
+      els.storageNote.textContent = `☁️ Sincronizado com a conta ${fb.usuario && fb.usuario.email || 'Google'}. Funciona offline e envia as mudanças quando a conexão voltar.`;
+    } else if (a && !a.persistente) {
       els.storageNote.textContent = '⚠ O navegador bloqueou o armazenamento local: o progresso e o histórico valem só enquanto a página estiver aberta.';
     } else {
-      els.storageNote.textContent = 'Progresso e histórico ficam salvos neste navegador. Use "Exportar backup" para levá-los a outro lugar.';
+      els.storageNote.textContent = fb.auth
+        ? 'Dados salvos só neste navegador. Entre com Google para sincronizar entre dispositivos.'
+        : 'Progresso e histórico ficam salvos neste navegador. Use "Exportar backup" para levá-los a outro lugar.';
     }
+  }
 
-    try { app.prefs = await Repo.carregarPreferencias(); } catch (e) { app.prefs = {}; }
+  // Recarrega preferências, rascunho, sessão pendente e histórico do armazenamento ativo
+  async function recarregarDados() {
+    try {
+      app.prefs = await Repo.carregarPreferencias();
+    } catch (e) {
+      console.error(e);
+      app.prefs = {};
+      if (e && e.code === 'permission-denied') toast('⚠ O Firestore negou o acesso. Confira se as regras foram publicadas.');
+    }
     const temaSistema = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'escuro' : 'claro';
     aplicarTema(app.prefs.tema || temaSistema);
     aplicarConfigNaTela(app.prefs.ultimaConfig);
-    if (app.prefs.rascunho) {
+    if (app.prefs.rascunho && els.stepImport && !els.stepImport.classList.contains('hidden')) {
       els.inputQuestions.value = app.prefs.rascunho.questoes || '';
       els.inputGabarito.value = app.prefs.rascunho.gabarito || '';
     }
-
     atualizarStatusImportacao();
+    atualizarNotaArmazenamento();
     await verificarSessaoPendente();
     await renderizarHistorico();
+  }
+
+  function renderizarConta() {
+    const u = fb.usuario;
+    els.btnLogin.classList.toggle('hidden', !!u);
+    els.accountUser.classList.toggle('hidden', !u);
+    if (u) {
+      els.accountName.textContent = u.displayName || u.email || 'Conectado';
+      els.accountUser.title = u.email || '';
+      if (u.photoURL) els.accountPhoto.src = u.photoURL; else els.accountPhoto.removeAttribute('src');
+    }
+  }
+
+  // Primeiro login: conta vazia na nuvem + dados neste navegador → oferece enviar
+  async function oferecerMigracao() {
+    try {
+      if (!(await Repo.estaVazio())) return;
+      const bk = await Repo.exportarBackup(fb.local);
+      const n = (bk.historico || []).length;
+      const temSessao = (bk.sessoes || []).some(x => x.status === 'andamento');
+      if (!n && !temSessao && !bk.preferencias) return;
+      const partes = [];
+      if (n) partes.push(plural(n, 'simulado no histórico', 'simulados no histórico'));
+      if (temSessao) partes.push('1 simulado em andamento');
+      if (!partes.length) partes.push('suas preferências');
+      if (!confirm(`Sua conta na nuvem ainda está vazia. Enviar os dados deste navegador (${partes.join(' e ')}) para ela?\n\nOs dados locais continuam guardados aqui.`)) return;
+      await Repo.importarBackup(bk);
+      toast('✅ Dados enviados para a nuvem.');
+    } catch (e) {
+      console.error(e);
+      toast('⚠ Não foi possível enviar os dados locais: ' + (e.code || e.message));
+    }
+  }
+
+  async function aoMudarUsuario(user) {
+    // Grava o que estiver pendente no armazenamento antigo antes de trocar
+    await salvarAgora();
+    fb.usuario = user || null;
+    if (user) {
+      Repo.usar(new window.SimuladoStorage.FirestoreAdapter(fb.db, user.uid));
+      renderizarConta();
+      await oferecerMigracao();
+    } else {
+      Repo.usar(fb.local);
+      renderizarConta();
+    }
+    // Simulado aberto continua na tela; passa a ser salvo no novo armazenamento
+    if (app.sessao && app.sessao.status === 'andamento') await salvarAgora();
+    await recarregarDados();
+  }
+
+  function iniciarFirebase() {
+    if (!window.firebase || !FB || !FB.config) return false;   // SDK não carregou (offline?) → modo local
+    if (location.protocol === 'file:') return false;          // login com Google não funciona em file://
+    try {
+      firebase.initializeApp(FB.config);
+      if (FB.appCheckSiteKey && firebase.appCheck) {
+        firebase.appCheck().activate(new firebase.appCheck.ReCaptchaEnterpriseProvider(FB.appCheckSiteKey), true);
+      }
+      fb.db = firebase.firestore();
+      fb.db.enablePersistence({ synchronizeTabs: true })
+        .catch(e => console.warn('Cache offline do Firestore indisponível:', e.code));
+      fb.auth = firebase.auth();
+    } catch (e) {
+      console.error('Falha ao iniciar o Firebase', e);
+      return false;
+    }
+
+    els.accountArea.classList.remove('hidden');
+    let primeiraVez = true;
+    fb.auth.onAuthStateChanged(async user => {
+      if (primeiraVez && !user) { primeiraVez = false; renderizarConta(); atualizarNotaArmazenamento(); return; }
+      primeiraVez = false;
+      await aoMudarUsuario(user);
+    });
+
+    els.btnLogin.addEventListener('click', async () => {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      try {
+        await fb.auth.signInWithPopup(provider);
+      } catch (e) {
+        if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
+          await fb.auth.signInWithRedirect(provider);
+        } else if (e.code === 'auth/unauthorized-domain') {
+          toast(`⚠ Domínio não autorizado: adicione ${location.hostname} em Authentication → Configurações → Domínios autorizados.`);
+        } else if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+          console.error(e);
+          toast('⚠ Não foi possível entrar: ' + (e.code || e.message));
+        }
+      }
+    });
+
+    els.btnLogout.addEventListener('click', async () => {
+      if (!confirm('Sair da conta? Seus dados continuam na nuvem; neste navegador o app volta ao modo local.')) return;
+      await salvarAgora();
+      await fb.auth.signOut();
+    });
+
+    els.btnCopyUid.addEventListener('click', async () => {
+      if (!fb.usuario) return;
+      try { await navigator.clipboard.writeText(fb.usuario.uid); toast('UID copiado: ' + fb.usuario.uid); }
+      catch (e) { prompt('Seu UID:', fb.usuario.uid); }
+    });
+    return true;
+  }
+
+  async function init() {
+    fb.local = new LocalStorageAdapter({ namespace: 'simulado-interativo' });
+    Repo.usar(fb.local);
+    await recarregarDados();   // mostra os dados locais imediatamente
+    iniciarFirebase();         // se houver login salvo, troca para a nuvem em seguida
   }
 
   init();
