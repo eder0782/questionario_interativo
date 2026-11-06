@@ -15,7 +15,8 @@
    2) REPOSITÓRIO — regras do app (sessões, histórico, preferências).
       O resto do app SÓ conversa com o Repositorio, nunca com o banco.
 
-   Para migrar: Repositorio.usar(new FirestoreAdapter(db, uid));
+   Uso: Repositorio.usar(new LocalStorageAdapter(...))  — sem login
+        Repositorio.usar(new FirestoreAdapter(db, uid))   — logado
    ========================================================= */
 (function (global) {
   'use strict';
@@ -25,7 +26,8 @@
   const COLECOES = {
     PREFERENCIAS: 'preferencias', // doc único "app": tema, última configuração, rascunho
     SESSOES: 'sessoes',           // simulados em andamento (estado completo)
-    HISTORICO: 'historico'        // resumo de cada simulado finalizado
+    HISTORICO: 'historico',       // resumo de cada simulado finalizado (lista leve)
+    RESULTADOS: 'resultados'      // simulado finalizado completo (questões + respostas), mesmo id do histórico
   };
 
   /* ---------------------------------------------------------
@@ -36,6 +38,8 @@
     constructor({ namespace = 'simulado', userId = 'local' } = {}) {
       this.ns = `${namespace}:${userId}`;
       this.memoria = null;
+      this.tipo = 'local';
+      this.intervaloSalvamento = 1500; // ms entre gravações automáticas
       try {
         const k = '__teste__';
         global.localStorage.setItem(k, '1');
@@ -84,6 +88,73 @@
     async deleteCollection(col) {
       const prefixo = this._chave(col, '');
       this._chaves().filter(k => k && k.startsWith(prefixo)).forEach(k => this._apagar(k));
+    }
+  }
+
+  /* ---------------------------------------------------------
+     Adaptador Firestore (SDK "compat" do Firebase, carregado por
+     <script>). Caminho: usuarios/{uid}/{colecao}/{id}
+     --------------------------------------------------------- */
+  const ESPERA_MAX_GRAVACAO = 4000;
+
+  class FirestoreAdapter {
+    constructor(db, userId) {
+      this.db = db;
+      this.userId = userId;
+      this.tipo = 'nuvem';
+      // Cada gravação conta na cota gratuita: o cronômetro salva a cada 10 s
+      this.intervaloSalvamento = 10000;
+    }
+    get persistente() { return true; }
+    _col(c) { return this.db.collection('usuarios').doc(this.userId).collection(c); }
+
+    // Offline, o Firestore guarda a gravação na fila local e só confirma quando
+    // a conexão volta. Não deixamos a tela travada esperando essa confirmação.
+    async _semTravar(promessa) {
+      let falhou = null;
+      const p = promessa.catch(e => { falhou = e; console.error('[Firestore]', e); });
+      await Promise.race([p, new Promise(r => setTimeout(r, ESPERA_MAX_GRAVACAO))]);
+      if (falhou) throw falhou;
+    }
+
+    async getDoc(c, id) {
+      const snap = await this._col(c).doc(id).get();
+      return snap.exists ? snap.data() : null;
+    }
+    async setDoc(c, id, dados) {
+      await this._semTravar(this._col(c).doc(id).set(dados));
+      return dados;
+    }
+    async deleteDoc(c, id) {
+      await this._semTravar(this._col(c).doc(id).delete());
+    }
+    async listDocs(c, { where, orderBy, direction = 'desc', limit } = {}) {
+      let q = this._col(c);
+      if (where) {
+        // where + orderBy exigiria índice composto: filtramos no servidor e ordenamos aqui
+        for (const [k, v] of Object.entries(where)) q = q.where(k, '==', v);
+      } else {
+        if (orderBy) q = q.orderBy(orderBy, direction);
+        if (limit) q = q.limit(limit);
+      }
+      const snap = await q.get();
+      let docs = snap.docs.map(d => d.data());
+      if (where) {
+        if (orderBy) {
+          const sinal = direction === 'desc' ? -1 : 1;
+          docs.sort((a, b) => (a[orderBy] < b[orderBy] ? -1 : a[orderBy] > b[orderBy] ? 1 : 0) * sinal);
+        }
+        if (limit) docs = docs.slice(0, limit);
+      }
+      return docs;
+    }
+    async deleteCollection(c) {
+      const snap = await this._col(c).get();
+      for (let i = 0; i < snap.docs.length; i += 400) {
+        const lote = this.db.batch();
+        snap.docs.slice(i, i + 400).forEach(d => lote.delete(d.ref));
+        await this._semTravar(lote.commit());
+      }
     }
   }
 
@@ -145,17 +216,42 @@
       const docs = await this.adapter.listDocs(COLECOES.HISTORICO, { orderBy: 'data', direction: 'desc', limit: limite });
       return docs.map(migrar);
     },
-    async limparHistorico() { return this.adapter.deleteCollection(COLECOES.HISTORICO); },
+    async limparHistorico() {
+      await this.adapter.deleteCollection(COLECOES.HISTORICO);
+      await this.adapter.deleteCollection(COLECOES.RESULTADOS);
+    },
 
-    /* Backup — também serve para importar os dados no Firebase depois */
-    async exportarBackup() {
+    /* Detalhes de um simulado finalizado (carregados só ao abrir) */
+    async salvarDetalhes(sessao) {
+      const doc = serializavel({ ...sessao, schemaVersion: SCHEMA_VERSION });
+      return this.adapter.setDoc(COLECOES.RESULTADOS, doc.id, doc);
+    },
+    async carregarDetalhes(id) {
+      return migrar(await this.adapter.getDoc(COLECOES.RESULTADOS, id));
+    },
+    async excluirResultado(id) {
+      await this.adapter.deleteDoc(COLECOES.HISTORICO, id);
+      await this.adapter.deleteDoc(COLECOES.RESULTADOS, id);
+    },
+
+    /* Conta nova? (sem preferências e sem histórico) */
+    async estaVazio(adapter = this.adapter) {
+      const prefs = await adapter.getDoc(COLECOES.PREFERENCIAS, 'app');
+      const hist = await adapter.listDocs(COLECOES.HISTORICO, { limit: 1 });
+      return !prefs && !hist.length;
+    },
+
+    /* Backup — também é usado para copiar os dados locais para a nuvem */
+    async exportarBackup(adapter = this.adapter) {
+      const a = adapter;
       return {
         app: 'simulado-interativo',
         schemaVersion: SCHEMA_VERSION,
         exportadoEm: agora(),
-        preferencias: await this.adapter.getDoc(COLECOES.PREFERENCIAS, 'app'),
-        sessoes: await this.adapter.listDocs(COLECOES.SESSOES),
-        historico: await this.adapter.listDocs(COLECOES.HISTORICO)
+        preferencias: await a.getDoc(COLECOES.PREFERENCIAS, 'app'),
+        sessoes: await a.listDocs(COLECOES.SESSOES),
+        historico: await a.listDocs(COLECOES.HISTORICO),
+        resultados: await a.listDocs(COLECOES.RESULTADOS)
       };
     },
     async importarBackup(backup) {
@@ -163,59 +259,17 @@
       if (backup.preferencias) await this.adapter.setDoc(COLECOES.PREFERENCIAS, 'app', backup.preferencias);
       for (const s of backup.sessoes || []) if (s && s.id) await this.adapter.setDoc(COLECOES.SESSOES, s.id, s);
       for (const h of backup.historico || []) if (h && h.id) await this.adapter.setDoc(COLECOES.HISTORICO, h.id, h);
+      for (const r of backup.resultados || []) if (r && r.id) await this.adapter.setDoc(COLECOES.RESULTADOS, r.id, r);
     }
   };
 
-  global.SimuladoStorage = { SCHEMA_VERSION, COLECOES, LocalStorageAdapter, Repositorio };
+  global.SimuladoStorage = { SCHEMA_VERSION, COLECOES, LocalStorageAdapter, FirestoreAdapter, Repositorio };
   if (typeof module !== 'undefined' && module.exports) module.exports = global.SimuladoStorage;
 })(typeof window !== 'undefined' ? window : globalThis);
 
 /* =========================================================
-   MODELO — Adaptador Firebase (Firestore), para o futuro.
-   ---------------------------------------------------------
-   1. No index.html, troque as tags <script> por módulos e carregue o SDK:
-        <script type="module">
-          import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-          import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-          import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection,
-                   query, where, orderBy, limit, getDocs }
-            from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-          ...
-        </script>
-
-   2. Adaptador com a MESMA interface do LocalStorageAdapter:
-
-      class FirestoreAdapter {
-        constructor(db, userId) { this.db = db; this.userId = userId; }
-        _col(c) { return collection(this.db, 'usuarios', this.userId, c); }  // usuarios/{uid}/{colecao}/{id}
-        async getDoc(c, id) { const s = await getDoc(doc(this._col(c), id)); return s.exists() ? s.data() : null; }
-        async setDoc(c, id, d) { await setDoc(doc(this._col(c), id), d); return d; }
-        async deleteDoc(c, id) { await deleteDoc(doc(this._col(c), id)); }
-        async listDocs(c, { where: w, orderBy: o, direction = 'desc', limit: l } = {}) {
-          const filtros = [];
-          if (w) for (const [k, v] of Object.entries(w)) filtros.push(where(k, '==', v));
-          if (o) filtros.push(orderBy(o, direction));
-          if (l) filtros.push(limit(l));
-          const snap = await getDocs(query(this._col(c), ...filtros));
-          return snap.docs.map(d => d.data());
-        }
-        async deleteCollection(c) {
-          const snap = await getDocs(this._col(c));
-          await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
-        }
-      }
-
-   3. Na inicialização (script.js, função init), troque UMA linha:
-        Repositorio.usar(new LocalStorageAdapter({ namespace: 'simulado-interativo' }));
-      por:
-        const cred = await signInAnonymously(getAuth(app));
-        Repositorio.usar(new FirestoreAdapter(getFirestore(app), cred.user.uid));
-
-   4. Observações:
-      - A consulta de sessão em andamento usa where(status) + orderBy(atualizadoEm):
-        o Firestore vai pedir um índice composto (o link aparece no console).
-      - Regras de segurança sugeridas:
-          match /usuarios/{uid}/{doc=**} { allow read, write: if request.auth.uid == uid; }
-      - Para levar os dados atuais: "Exportar backup" aqui, e depois
-        Repositorio.importarBackup(json) já com o FirestoreAdapter ativo.
+   Para trocar de banco no futuro (Supabase, API própria etc.):
+   escreva outra classe com os mesmos 5 métodos assíncronos
+   (getDoc, setDoc, deleteDoc, listDocs, deleteCollection)
+   e passe-a para Repositorio.usar(...). O resto do app não muda.
    ========================================================= */
