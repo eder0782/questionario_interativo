@@ -300,8 +300,30 @@ button:disabled { opacity: .5; cursor: not-allowed }
 .hist-row:hover, .hist-row:focus-visible { background: var(--primary-soft); outline: none }
 .hist-actions { white-space: nowrap; text-align: right }
 .hist-open { color: var(--primary); font-weight: 600; font-size: .82rem; margin-right: 8px }
-.btn-row-del { padding: 4px 8px; background: transparent; font-size: .9rem; opacity: .55 }
-.btn-row-del:hover { opacity: 1; background: var(--danger-bg) }
+.btn-row-icon { padding: 4px 8px; background: transparent; font-size: .9rem; opacity: .6 }
+.btn-row-icon:hover { opacity: 1; background: var(--surface) }
+.btn-row-icon.danger:hover { background: var(--danger-bg) }
+.btn-row-icon.ok { color: var(--success); opacity: 1; font-weight: 700 }
+.hist-row.editing { cursor: default; background: var(--primary-soft) }
+.hist-edit { display: flex; gap: 4px; align-items: center; min-width: 220px }
+.hist-edit-input { padding: 5px 8px !important; font-size: .88rem }
+.hist-title mark { background: var(--warn-bg); color: inherit; border-radius: 3px; padding: 0 1px }
+.hist-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 10px 0 12px }
+.hist-toolbar input[type="search"] {
+  flex: 1; min-width: 200px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
+  font: inherit; background: var(--input); color: var(--text);
+}
+.hist-toolbar input[type="search"]:focus { outline: none; border-color: var(--primary); background: var(--card) }
+.hist-perpage { font-size: .85rem; color: var(--muted); display: flex; align-items: center; gap: 6px }
+.hist-perpage select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--input); color: var(--text); font: inherit }
+.pagination { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px }
+.pagination:empty { display: none }
+.pg-info { font-size: .82rem; color: var(--muted) }
+.pg-buttons { display: flex; gap: 4px; align-items: center }
+.pg-btn { min-width: 34px; padding: 6px 10px; font-size: .85rem; background: var(--surface); border: 1px solid var(--border); color: var(--text-soft) }
+.pg-btn:hover:not(:disabled) { border-color: var(--primary) }
+.pg-btn.active { background: var(--primary); border-color: var(--primary); color: var(--on-primary) }
+.pg-gap { color: var(--muted); padding: 0 2px }
 .result-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap }
 .result-head .hint { margin-bottom: 0 }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap }

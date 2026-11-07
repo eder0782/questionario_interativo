@@ -212,9 +212,16 @@
       const doc = serializavel({ ...resumo, schemaVersion: SCHEMA_VERSION });
       return this.adapter.setDoc(COLECOES.HISTORICO, doc.id, doc);
     },
-    async listarHistorico(limite = 20) {
+    async listarHistorico(limite = null) { // null = todos (pesquisa e paginação são feitas no app)
       const docs = await this.adapter.listDocs(COLECOES.HISTORICO, { orderBy: 'data', direction: 'desc', limit: limite });
       return docs.map(migrar);
+    },
+    async renomearResultado(id, titulo) {
+      const h = await this.adapter.getDoc(COLECOES.HISTORICO, id);
+      if (!h) throw new Error('Simulado não encontrado.');
+      await this.adapter.setDoc(COLECOES.HISTORICO, id, serializavel({ ...h, titulo }));
+      const r = await this.adapter.getDoc(COLECOES.RESULTADOS, id);
+      if (r) await this.adapter.setDoc(COLECOES.RESULTADOS, id, serializavel({ ...r, titulo }));
     },
     async limparHistorico() {
       await this.adapter.deleteCollection(COLECOES.HISTORICO);

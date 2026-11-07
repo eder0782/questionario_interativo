@@ -1,0 +1,31 @@
+rules_version = '2';
+
+// =========================================================
+// Simulado Interativo — regras do Cloud Firestore
+// Cole no console: Firestore Database → Regras → Publicar.
+// Tudo o que não estiver liberado aqui fica BLOQUEADO.
+// =========================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ETAPA 1 (agora): cada usuário logado acessa só a própria pasta.
+    // Login anônimo não é aceito.
+    match /usuarios/{uid}/{colecao}/{id} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == uid
+                         && request.auth.token.firebase.sign_in_provider != 'anonymous'
+                         && colecao in ['preferencias', 'sessoes', 'historico', 'resultados'];
+    }
+
+    // ETAPA 2 (depois do 1º login): só VOCÊ pode usar o banco.
+    // 1. Entre no app, clique em "UID" para copiar o seu.
+    // 2. Apague o bloco da ETAPA 1 acima e descomente este, trocando SEU_UID_AQUI.
+    //
+    // match /usuarios/{uid}/{colecao}/{id} {
+    //   allow read, write: if request.auth != null
+    //                      && request.auth.uid == uid
+    //                      && uid == 'SEU_UID_AQUI'
+    //                      && colecao in ['preferencias', 'sessoes', 'historico', 'resultados'];
+    // }
+  }
+}

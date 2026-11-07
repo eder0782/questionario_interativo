@@ -95,7 +95,7 @@
     'input-gabarito', 'file-gabarito', 'status-gabarito', 'import-warnings',
     'input-title', 'opt-meta', 'opt-shuffle-q', 'opt-shuffle-alt',
     'btn-example', 'btn-clear', 'btn-start',
-    'history-list', 'btn-export-backup', 'file-backup', 'btn-clear-history', 'storage-note',
+    'history-list', 'hist-toolbar', 'hist-search', 'hist-per-page', 'hist-pagination', 'btn-export-backup', 'file-backup', 'btn-clear-history', 'storage-note',
     'btn-help', 'btn-theme',
     'account-area', 'btn-login', 'account-user', 'account-photo', 'account-name', 'btn-copy-uid', 'btn-logout',
     'quiz-layout', 'text-side', 'text-side-title', 'text-side-body',
@@ -1011,27 +1011,158 @@ MÓDULO 2
   /* =========================================================
      MÓDULO 10 — HISTÓRICO E BACKUP
      ========================================================= */
+  /* Estado da lista: todos os resumos ficam em memória; pesquisa e
+     paginação são feitas aqui, sem novas leituras no banco. */
+  const hist = { todos: [], busca: '', pagina: 1, porPagina: 10, editando: null };
+
+  const normalizar = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const textoBusca = r => normalizar([r.titulo, fmtData(r.data), r.modo, ...(r.porModulo || []).map(m => m.nome)].join(' '));
+
+  function destacar(texto, termo) {
+    const seguro = esc(texto);
+    if (!termo) return seguro;
+    // Procura no texto sem acento, mas destaca o trecho original
+    const base = normalizar(texto);
+    const i = base.indexOf(termo);
+    if (i < 0) return seguro;
+    return esc(texto.slice(0, i)) + '<mark>' + esc(texto.slice(i, i + termo.length)) + '</mark>' + esc(texto.slice(i + termo.length));
+  }
+
+  // Recarrega do banco e redesenha (após finalizar, excluir, importar, trocar de conta...)
   async function renderizarHistorico() {
-    let h = [];
-    try { h = await Repo.listarHistorico(15); } catch (e) { console.error(e); }
-    if (!h.length) {
+    try { hist.todos = await Repo.listarHistorico(null); } catch (e) { console.error(e); hist.todos = []; }
+    desenharHistorico();
+  }
+
+  function filtrarHistorico() {
+    const termos = normalizar(hist.busca).split(/\s+/).filter(Boolean);
+    if (!termos.length) return hist.todos;
+    return hist.todos.filter(r => { const t = textoBusca(r); return termos.every(x => t.includes(x)); });
+  }
+
+  function desenharHistorico() {
+    const temAlgum = hist.todos.length > 0;
+    els.histToolbar.classList.toggle('hidden', !temAlgum);
+    if (!temAlgum) {
       els.historyList.innerHTML = '<p class="empty-list">Nenhum simulado finalizado ainda.</p>';
+      els.histPagination.innerHTML = '';
       return;
     }
+
+    const lista = filtrarHistorico();
+    const total = lista.length;
+    const paginas = Math.max(1, Math.ceil(total / hist.porPagina));
+    hist.pagina = Math.min(Math.max(1, hist.pagina), paginas);
+    const ini = (hist.pagina - 1) * hist.porPagina;
+    const pagina = lista.slice(ini, ini + hist.porPagina);
+    const termo = normalizar(hist.busca.trim());
+    const termoUnico = termo && !/\s/.test(termo) ? termo : '';
+
+    if (!total) {
+      els.historyList.innerHTML = `<p class="empty-list">Nenhum simulado encontrado para “${esc(hist.busca.trim())}”.</p>`;
+      els.histPagination.innerHTML = '';
+      return;
+    }
+
     els.historyList.innerHTML = `
       <div class="table-scroll"><table class="data-table">
         <thead><tr><th>Data</th><th>Simulado</th><th>Modo</th><th class="num">Acertos</th><th class="num">%</th><th class="num">Tempo</th><th><span class="sr-only">Ações</span></th></tr></thead>
-        <tbody>${h.map(r => `
-          <tr class="hist-row" data-id="${esc(r.id)}" tabindex="0" role="button" title="Ver detalhes deste simulado">
+        <tbody>${pagina.map(r => {
+          const editando = hist.editando === r.id;
+          const ce = r.liquidoCE !== null && r.liquidoCE !== undefined ? ` <span class="muted">· líquida C/E: ${r.liquidoCE}</span>` : '';
+          const tituloHtml = editando
+            ? `<span class="hist-edit">
+                 <input type="text" class="hist-edit-input" data-edit-input="${esc(r.id)}" value="${esc(r.titulo)}" maxlength="120" aria-label="Novo nome do simulado">
+                 <button type="button" class="btn-row-icon ok" data-save="${esc(r.id)}" title="Salvar (Enter)" aria-label="Salvar nome">✓</button>
+                 <button type="button" class="btn-row-icon" data-cancel="${esc(r.id)}" title="Cancelar (Esc)" aria-label="Cancelar">✕</button>
+               </span>`
+            : `<span class="hist-title">${destacar(r.titulo, termoUnico)}</span>${ce}`;
+          return `
+          <tr class="hist-row${editando ? ' editing' : ''}" data-id="${esc(r.id)}" ${editando ? '' : 'tabindex="0" role="button" title="Ver detalhes deste simulado"'}>
             <td>${esc(fmtData(r.data))}</td>
-            <td>${esc(r.titulo)}${r.liquidoCE !== null && r.liquidoCE !== undefined ? ` <span class="muted">· líquida C/E: ${r.liquidoCE}</span>` : ''}</td>
+            <td>${tituloHtml}</td>
             <td>${esc(r.modo)}</td>
             <td class="num">${r.acertos}/${r.consideradas}</td>
             <td class="num"><span class="pct-bar ${classePct(r.percentual)}"><i style="width:${r.percentual}%"></i></span>${r.percentual}%</td>
             <td class="num">${fmtTempo(r.tempoTotal)}</td>
-            <td class="hist-actions"><span class="hist-open">Ver ›</span><button type="button" class="btn-row-del" data-del="${esc(r.id)}" title="Excluir do histórico" aria-label="Excluir do histórico">🗑</button></td>
-          </tr>`).join('')}
+            <td class="hist-actions">${editando ? '' : `<span class="hist-open">Ver ›</span>
+              <button type="button" class="btn-row-icon" data-edit="${esc(r.id)}" title="Renomear" aria-label="Renomear simulado">✏️</button>
+              <button type="button" class="btn-row-icon danger" data-del="${esc(r.id)}" title="Excluir do histórico" aria-label="Excluir do histórico">🗑</button>`}</td>
+          </tr>`;
+        }).join('')}
         </tbody></table></div>`;
+
+    desenharPaginacao(total, paginas, ini, pagina.length);
+
+    if (hist.editando) {
+      const inp = els.historyList.querySelector('.hist-edit-input');
+      if (inp) { inp.focus(); inp.select(); }
+    }
+  }
+
+  function desenharPaginacao(total, paginas, ini, qtd) {
+    const info = `<span class="pg-info">${ini + 1}–${ini + qtd} de ${plural(total, 'simulado', 'simulados')}</span>`;
+    if (paginas <= 1) { els.histPagination.innerHTML = info; return; }
+    const p = hist.pagina;
+    // Janela de páginas: 1 … p-1 p p+1 … última
+    const nums = new Set([1, paginas, p - 1, p, p + 1].filter(n => n >= 1 && n <= paginas));
+    const ordem = [...nums].sort((x, y) => x - y);
+    let botoes = '';
+    ordem.forEach((n, i) => {
+      if (i && n - ordem[i - 1] > 1) botoes += '<span class="pg-gap">…</span>';
+      botoes += `<button type="button" class="pg-btn${n === p ? ' active' : ''}" data-page="${n}" ${n === p ? 'aria-current="page"' : ''}>${n}</button>`;
+    });
+    els.histPagination.innerHTML = `${info}
+      <div class="pg-buttons">
+        <button type="button" class="pg-btn" data-page="${p - 1}" ${p === 1 ? 'disabled' : ''} aria-label="Página anterior">‹</button>
+        ${botoes}
+        <button type="button" class="pg-btn" data-page="${p + 1}" ${p === paginas ? 'disabled' : ''} aria-label="Próxima página">›</button>
+      </div>`;
+  }
+
+  els.histPagination.addEventListener('click', e => {
+    const b = e.target.closest('[data-page]');
+    if (!b || b.disabled) return;
+    hist.pagina = parseInt(b.dataset.page, 10);
+    hist.editando = null;
+    desenharHistorico();
+  });
+
+  els.histSearch.addEventListener('input', debounce(() => {
+    hist.busca = els.histSearch.value;
+    hist.pagina = 1;
+    hist.editando = null;
+    desenharHistorico();
+  }, 200));
+
+  els.histPerPage.addEventListener('change', () => {
+    hist.porPagina = parseInt(els.histPerPage.value, 10) || 10;
+    hist.pagina = 1;
+    app.prefs.histPorPagina = hist.porPagina;
+    salvarPreferencias();
+    desenharHistorico();
+  });
+
+  async function salvarTitulo(id) {
+    const inp = els.historyList.querySelector('.hist-edit-input'); // só uma linha é editada por vez
+    if (!inp) return;
+    const novo = inp.value.replace(/\s+/g, ' ').trim();
+    const reg = hist.todos.find(r => r.id === id);
+    if (!novo) { toast('O nome não pode ficar vazio.'); inp.focus(); return; }
+    if (reg && novo === reg.titulo) { hist.editando = null; desenharHistorico(); return; }
+    inp.disabled = true;
+    try {
+      await Repo.renomearResultado(id, novo);
+      if (reg) reg.titulo = novo;
+      if (app.sessao && app.sessao.id === id) { app.sessao.titulo = novo; els.resultTitle.textContent = `Resultado — ${novo}`; }
+      hist.editando = null;
+      desenharHistorico();
+      toast('✅ Nome atualizado.');
+    } catch (e) {
+      console.error(e);
+      inp.disabled = false;
+      toast('⚠ Não foi possível renomear: ' + (e.code || e.message));
+    }
   }
 
   async function abrirDoHistorico(id) {
@@ -1049,19 +1180,31 @@ MÓDULO 2
   }
 
   els.historyList.addEventListener('click', async e => {
-    const del = e.target.closest('[data-del]');
+    const t = e.target;
+    const del = t.closest('[data-del]');
     if (del) {
-      e.stopPropagation();
       if (!confirm('Excluir este simulado do histórico?')) return;
       await Repo.excluirResultado(del.dataset.del);
-      renderizarHistorico();
+      await renderizarHistorico();
       toast('Simulado excluído do histórico.');
       return;
     }
-    const row = e.target.closest('.hist-row');
-    if (row) abrirDoHistorico(row.dataset.id);
+    const edit = t.closest('[data-edit]');
+    if (edit) { hist.editando = edit.dataset.edit; desenharHistorico(); return; }
+    const save = t.closest('[data-save]');
+    if (save) { salvarTitulo(save.dataset.save); return; }
+    if (t.closest('[data-cancel]')) { hist.editando = null; desenharHistorico(); return; }
+    const row = t.closest('.hist-row');
+    if (row && !row.classList.contains('editing')) abrirDoHistorico(row.dataset.id);
   });
+
   els.historyList.addEventListener('keydown', e => {
+    const inp = e.target.closest('[data-edit-input]');
+    if (inp) {
+      if (e.key === 'Enter') { e.preventDefault(); salvarTitulo(inp.dataset.editInput); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); hist.editando = null; desenharHistorico(); }
+      return;
+    }
     const row = e.target.closest('.hist-row');
     if (row && e.target === row && (e.key === 'Enter' || e.key === ' ')) {
       e.preventDefault();
@@ -1196,6 +1339,10 @@ MÓDULO 2
     const temaSistema = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'escuro' : 'claro';
     aplicarTema(app.prefs.tema || temaSistema);
     aplicarConfigNaTela(app.prefs.ultimaConfig);
+    if (app.prefs.histPorPagina) {
+      hist.porPagina = app.prefs.histPorPagina;
+      els.histPerPage.value = String(hist.porPagina);
+    }
     if (app.prefs.rascunho && els.stepImport && !els.stepImport.classList.contains('hidden')) {
       els.inputQuestions.value = app.prefs.rascunho.questoes || '';
       els.inputGabarito.value = app.prefs.rascunho.gabarito || '';
