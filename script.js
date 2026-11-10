@@ -1013,7 +1013,7 @@ MÓDULO 2
      ========================================================= */
   /* Estado da lista: todos os resumos ficam em memória; pesquisa e
      paginação são feitas aqui, sem novas leituras no banco. */
-  const hist = { todos: [], busca: '', pagina: 1, porPagina: 10, editando: null };
+  const hist = { todos: [], busca: '', pagina: 1, porPagina: 5, editando: null };
 
   const normalizar = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const textoBusca = r => normalizar([r.titulo, fmtData(r.data), r.modo, ...(r.porModulo || []).map(m => m.nome)].join(' '));
@@ -1136,7 +1136,7 @@ MÓDULO 2
   }, 200));
 
   els.histPerPage.addEventListener('change', () => {
-    hist.porPagina = parseInt(els.histPerPage.value, 10) || 10;
+    hist.porPagina = parseInt(els.histPerPage.value, 10) || 5;
     hist.pagina = 1;
     app.prefs.histPorPagina = hist.porPagina;
     salvarPreferencias();
