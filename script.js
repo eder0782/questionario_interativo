@@ -798,8 +798,18 @@ MÓDULO 2
       liquidoCE: liquido,
       chutes: chutes.length,
       chutesCertos: chutes.filter(i => i.sit === 'certa').length,
+      ...contarMarcacoes(s),
       tempoTotal: s.tempoTotal || 0,
       porModulo
+    };
+  }
+
+  // Quantas questões foram marcadas como chute e para revisar (todas, respondidas ou não)
+  function contarMarcacoes(s) {
+    const m = Object.values(s.marcacoes || {});
+    return {
+      marcadasChute: m.filter(x => x && x.chute).length,
+      marcadasRevisar: m.filter(x => x && x.revisar).length
     };
   }
 
@@ -1032,6 +1042,37 @@ MÓDULO 2
   async function renderizarHistorico() {
     try { hist.todos = await Repo.listarHistorico(null); } catch (e) { console.error(e); hist.todos = []; }
     desenharHistorico();
+    if (await completarMarcacoes(hist.todos)) desenharHistorico();
+  }
+
+  // Simulados salvos antes desta versão não têm a contagem de marcações no resumo.
+  // Calcula uma única vez a partir dos detalhes e grava no resumo (migração).
+  let completando = false;
+  async function completarMarcacoes(lista) {
+    const faltando = lista.filter(r => r.marcadasChute === undefined);
+    if (!faltando.length || completando) return false;
+    completando = true;
+    try {
+      for (const r of faltando) {
+        let det = null;
+        try { det = await Repo.carregarDetalhes(r.id); } catch (e) { console.error(e); }
+        if (det) Object.assign(r, contarMarcacoes(det));
+        else Object.assign(r, { marcadasChute: r.chutes || 0, marcadasRevisar: null }); // sem detalhes: revisar desconhecido
+        try { await Repo.atualizarResumo(r); } catch (e) { console.error(e); }
+      }
+    } finally { completando = false; }
+    return true;
+  }
+
+  function celulaMarcacoes(r) {
+    if (r.marcadasChute === undefined) return '<span class="muted">…</span>';
+    const ch = r.marcadasChute || 0;
+    if (r.marcadasRevisar === null) {
+      return `<span title="🎲 ${ch} chute(s) · 🚩 revisar não registrado (simulado antigo, sem detalhes)">${ch}<span class="muted">*</span></span>`;
+    }
+    const rv = r.marcadasRevisar || 0;
+    const total = ch + rv;
+    return `<span class="${total ? 'marc-count' : 'muted'}" title="🎲 ${ch} chute(s) · 🚩 ${rv} para revisar">${total}</span>`;
   }
 
   function filtrarHistorico() {
@@ -1066,7 +1107,7 @@ MÓDULO 2
 
     els.historyList.innerHTML = `
       <div class="table-scroll"><table class="data-table">
-        <thead><tr><th>Data</th><th>Simulado</th><th>Modo</th><th class="num">Acertos</th><th class="num">%</th><th class="num">Tempo</th><th><span class="sr-only">Ações</span></th></tr></thead>
+        <thead><tr><th>Data</th><th>Simulado</th><th>Modo</th><th class="num">Acertos</th><th class="num" title="Questões marcadas como chute ou para revisar (soma dos dois)">🎲+🚩</th><th class="num">%</th><th class="num">Tempo</th><th><span class="sr-only">Ações</span></th></tr></thead>
         <tbody>${pagina.map(r => {
           const editando = hist.editando === r.id;
           const ce = r.liquidoCE !== null && r.liquidoCE !== undefined ? ` <span class="muted">· líquida C/E: ${r.liquidoCE}</span>` : '';
@@ -1083,6 +1124,7 @@ MÓDULO 2
             <td>${tituloHtml}</td>
             <td>${esc(r.modo)}</td>
             <td class="num">${r.acertos}/${r.consideradas}</td>
+            <td class="num">${celulaMarcacoes(r)}</td>
             <td class="num"><span class="pct-bar ${classePct(r.percentual)}"><i style="width:${r.percentual}%"></i></span>${r.percentual}%</td>
             <td class="num">${fmtTempo(r.tempoTotal)}</td>
             <td class="hist-actions">${editando ? '' : `<span class="hist-open">Ver ›</span>
