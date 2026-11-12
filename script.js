@@ -1023,7 +1023,52 @@ MÓDULO 2
      ========================================================= */
   /* Estado da lista: todos os resumos ficam em memória; pesquisa e
      paginação são feitas aqui, sem novas leituras no banco. */
-  const hist = { todos: [], busca: '', pagina: 1, porPagina: 5, editando: null };
+  const hist = { todos: [], busca: '', pagina: 1, porPagina: 5, editando: null, ordem: { campo: 'data', dir: 'desc' } };
+
+  /* Colunas ordenáveis: valor usado na comparação de cada uma */
+  const totalMarcacoes = r => (r.marcadasChute || 0) + (r.marcadasRevisar || 0);
+  const COLUNAS_HIST = [
+    { campo: 'data', rotulo: 'Data', valor: r => r.data || '' },
+    { campo: 'titulo', rotulo: 'Simulado', valor: r => r.titulo || '', texto: true },
+    { campo: 'modo', rotulo: 'Modo', valor: r => r.modo || '', texto: true },
+    { campo: 'acertos', rotulo: 'Acertos', num: true, valor: r => r.acertos || 0 },
+    { campo: 'marcacoes', rotulo: '🎲+🚩', num: true, valor: totalMarcacoes, dica: 'Questões marcadas como chute ou para revisar (soma dos dois)' },
+    { campo: 'percentual', rotulo: '%', num: true, valor: r => r.percentual || 0 },
+    { campo: 'tempoTotal', rotulo: 'Tempo', num: true, valor: r => r.tempoTotal || 0 }
+  ];
+  const comparaTexto = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
+
+  function ordenarHistorico(lista) {
+    const col = COLUNAS_HIST.find(c => c.campo === hist.ordem.campo) || COLUNAS_HIST[0];
+    const sinal = hist.ordem.dir === 'asc' ? 1 : -1;
+    return lista.slice().sort((a, b) => {
+      const va = col.valor(a), vb = col.valor(b);
+      const r = col.texto ? comparaTexto.compare(va, vb) : (va < vb ? -1 : va > vb ? 1 : 0);
+      if (r) return r * sinal;
+      return (a.data < b.data ? 1 : a.data > b.data ? -1 : 0); // desempate: mais recente primeiro
+    });
+  }
+
+  function cabecalhoHistorico() {
+    return COLUNAS_HIST.map(c => {
+      const ativa = hist.ordem.campo === c.campo;
+      const seta = ativa ? (hist.ordem.dir === 'asc' ? '▲' : '▼') : '';
+      const aria = ativa ? (hist.ordem.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+      const dica = (c.dica ? c.dica + ' — ' : '') + 'Clique para ordenar';
+      return `<th class="${c.num ? 'num ' : ''}th-sort${ativa ? ' active' : ''}" aria-sort="${aria}">` +
+        `<button type="button" class="th-sort-btn" data-sort="${c.campo}" title="${esc(dica)}">${esc(c.rotulo)}<span class="sort-arrow" aria-hidden="true">${seta}</span></button></th>`;
+    }).join('') + '<th><span class="sr-only">Ações</span></th>';
+  }
+
+  function alternarOrdem(campo) {
+    if (hist.ordem.campo === campo) hist.ordem.dir = hist.ordem.dir === 'asc' ? 'desc' : 'asc';
+    else hist.ordem = { campo, dir: 'asc' }; // 1º clique num campo novo: crescente
+    hist.pagina = 1;
+    hist.editando = null;
+    desenharHistorico();
+    const btn = els.historyList.querySelector(`[data-sort="${campo}"]`);
+    if (btn) btn.focus();
+  }
 
   const normalizar = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const textoBusca = r => normalizar([r.titulo, fmtData(r.data), r.modo, ...(r.porModulo || []).map(m => m.nome)].join(' '));
@@ -1090,7 +1135,7 @@ MÓDULO 2
       return;
     }
 
-    const lista = filtrarHistorico();
+    const lista = ordenarHistorico(filtrarHistorico());
     const total = lista.length;
     const paginas = Math.max(1, Math.ceil(total / hist.porPagina));
     hist.pagina = Math.min(Math.max(1, hist.pagina), paginas);
@@ -1107,7 +1152,7 @@ MÓDULO 2
 
     els.historyList.innerHTML = `
       <div class="table-scroll"><table class="data-table">
-        <thead><tr><th>Data</th><th>Simulado</th><th>Modo</th><th class="num">Acertos</th><th class="num" title="Questões marcadas como chute ou para revisar (soma dos dois)">🎲+🚩</th><th class="num">%</th><th class="num">Tempo</th><th><span class="sr-only">Ações</span></th></tr></thead>
+        <thead><tr>${cabecalhoHistorico()}</tr></thead>
         <tbody>${pagina.map(r => {
           const editando = hist.editando === r.id;
           const ce = r.liquidoCE !== null && r.liquidoCE !== undefined ? ` <span class="muted">· líquida C/E: ${r.liquidoCE}</span>` : '';
@@ -1223,6 +1268,8 @@ MÓDULO 2
 
   els.historyList.addEventListener('click', async e => {
     const t = e.target;
+    const sortBtn = t.closest('[data-sort]');
+    if (sortBtn) { alternarOrdem(sortBtn.dataset.sort); return; }
     const del = t.closest('[data-del]');
     if (del) {
       if (!confirm('Excluir este simulado do histórico?')) return;
