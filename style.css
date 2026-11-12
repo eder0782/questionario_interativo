@@ -299,6 +299,16 @@ button:disabled { opacity: .5; cursor: not-allowed }
 .hist-row { cursor: pointer; transition: background .12s }
 .hist-row:hover, .hist-row:focus-visible { background: var(--primary-soft); outline: none }
 .hist-actions { white-space: nowrap; text-align: right }
+.th-sort { padding: 0 !important }
+.th-sort-btn {
+  width: 100%; padding: 8px 10px; background: transparent; border-radius: 0; justify-content: flex-start; gap: 4px;
+  font: inherit; font-weight: 600; font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted);
+}
+.th-sort.num .th-sort-btn { justify-content: flex-end }
+.th-sort-btn:hover { color: var(--text); background: var(--surface) }
+.th-sort.active .th-sort-btn { color: var(--primary) }
+.sort-arrow { font-size: .7rem; min-width: .8em; display: inline-block }
+.marc-count { display: inline-block; min-width: 24px; padding: 1px 7px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); font-weight: 700; cursor: help }
 .hist-open { color: var(--primary); font-weight: 600; font-size: .82rem; margin-right: 8px }
 .btn-row-icon { padding: 4px 8px; background: transparent; font-size: .9rem; opacity: .6 }
 .btn-row-icon:hover { opacity: 1; background: var(--surface) }

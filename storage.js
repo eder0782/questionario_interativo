@@ -216,6 +216,10 @@
       const docs = await this.adapter.listDocs(COLECOES.HISTORICO, { orderBy: 'data', direction: 'desc', limit: limite });
       return docs.map(migrar);
     },
+    async atualizarResumo(resumo) {
+      const doc = serializavel({ ...resumo, schemaVersion: SCHEMA_VERSION });
+      return this.adapter.setDoc(COLECOES.HISTORICO, doc.id, doc);
+    },
     async renomearResultado(id, titulo) {
       const h = await this.adapter.getDoc(COLECOES.HISTORICO, id);
       if (!h) throw new Error('Simulado não encontrado.');
