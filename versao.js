@@ -9,8 +9,43 @@
      - CORREÇÃO: ajuste ou correção pequena.
    ========================================================= */
 window.SIMULADO_VERSAO = {
-  atual: '2.5.0',
+  atual: '2.6.2',
   historico: [
+    {
+      versao: '2.6.2',
+      data: '2026-11-16',
+      titulo: 'Menu de ações no histórico',
+      itens: [
+        'As ações de cada simulado (Ver detalhes/Ver evolução, Renomear e Excluir) agora ficam num botão "⋯", liberando espaço na tabela.',
+        'Clicar na linha continua abrindo os detalhes (ou a evolução, quando há várias tentativas).',
+        'O menu pode ser usado pelo teclado: setas para navegar, Enter para escolher e Esc para fechar.'
+      ]
+    },
+    {
+      versao: '2.6.1',
+      data: '2026-11-16',
+      titulo: 'Histórico mais compacto',
+      itens: [
+        'Linhas do histórico com altura fixa: cada simulado ocupa uma única linha.',
+        'Nomes longos terminam em "…"; o nome completo aparece ao passar o mouse.',
+        'Tela inicial e tela de evolução mais largas em telas grandes, sem barra de rolagem no histórico.',
+        'No celular, o histórico mostra só o essencial: data, simulado, tentativas, acertos e nota.'
+      ]
+    },
+    {
+      versao: '2.6.0',
+      data: '2026-11-16',
+      titulo: 'Tentativas, revisões e evolução',
+      itens: [
+        '"Refazer tudo" grava uma nova tentativa do mesmo simulado; as notas anteriores ficam guardadas para comparar.',
+        '"Revisar erradas" grava uma revisão ligada ao simulado, comparada questão a questão, sem entrar na evolução da nota.',
+        'Ao importar de novo um simulado já feito, o app oferece registrar como nova tentativa.',
+        'Histórico com uma linha por simulado: coluna Tentativas e nota da última com a evolução (ex.: 80% → 90% ▲).',
+        'Nova tela de evolução: gráfico das notas, lista de tentativas e matriz questão × tentativa.',
+        'Filtros da matriz: errou sempre, corrigiu, regrediu e sempre acertou; exportar as que errou sempre para o caderno de erros.',
+        'Ao terminar uma nova tentativa, o resultado mostra a comparação com a anterior (pontos, corrigidas e novas erradas).'
+      ]
+    },
     {
       versao: '2.5.0',
       data: '2026-11-16',
