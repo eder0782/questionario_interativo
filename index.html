@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="container" id="app-container">
+<div class="container medium" id="app-container">
   <header class="topbar">
     <div>
       <h1>📝 Simulado Interativo</h1>
@@ -208,6 +208,43 @@
     </div>
   </section>
 
+  <!-- ================= EVOLUÇÃO DE UM SIMULADO ================= -->
+  <section id="step-group" class="hidden">
+    <div class="card">
+      <div class="result-head">
+        <div>
+          <h2 id="group-title">Evolução</h2>
+          <p class="hint" id="group-sub"></p>
+        </div>
+        <button type="button" class="btn-secondary btn-small" id="btn-group-back">← Voltar ao histórico</button>
+      </div>
+      <div id="group-evolution" class="group-evolution"></div>
+      <h3 class="field-label" style="margin:8px 0 6px">Tentativas e revisões</h3>
+      <div id="group-attempts"></div>
+      <div class="actions">
+        <div class="btn-group">
+          <button type="button" class="btn-primary" id="btn-group-redo" title="Refaz todas as questões como nova tentativa">Nova tentativa</button>
+          <button type="button" class="btn-secondary" id="btn-group-review" title="Revisão só com as questões que você errou sempre ou que regrediu">Revisar “errou sempre” + “regrediu”</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Comparação por questão</h2>
+        <div class="result-filters" id="group-filters" role="tablist"></div>
+      </div>
+      <p class="hint">Cada coluna é uma tentativa (T) ou revisão (R). ✓ certa · ✗ errada · ○ em branco · · não fez parte. Clique numa questão para ver o enunciado, as suas respostas e o comentário.</p>
+      <div id="group-matrix"></div>
+      <div class="actions" style="margin-top:12px">
+        <span class="hint" style="margin:0">Questões que você errou em todas as vezes, para o caderno de erros:</span>
+        <div class="btn-group">
+          <button type="button" class="btn-secondary btn-small" id="btn-copy-persist">📋 Copiar “errou sempre”</button>
+          <button type="button" class="btn-secondary btn-small" id="btn-download-persist">⬇ Baixar .txt</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ================= ETAPA 3 — RESULTADO ================= -->
   <section id="step-result" class="hidden">
     <div class="card">
@@ -218,14 +255,15 @@
         </div>
         <button type="button" class="btn-secondary btn-small hidden" id="btn-back-history">← Voltar ao histórico</button>
       </div>
+      <div id="result-compare" class="result-compare hidden" aria-live="polite"></div>
       <div class="score-summary" id="score-summary"></div>
       <div id="result-extra" class="result-extra"></div>
       <div id="module-table-wrap"></div>
       <div class="actions">
         <div class="btn-group">
-          <button type="button" class="btn-secondary" id="btn-redo-all">Refazer tudo</button>
-          <button type="button" class="btn-secondary" id="btn-redo-wrong">Refazer erradas</button>
-          <button type="button" class="btn-secondary" id="btn-redo-wrong-guess">Refazer erradas + chutes</button>
+          <button type="button" class="btn-secondary" id="btn-redo-all" title="Nova tentativa do mesmo simulado, para comparar a nota">Refazer tudo</button>
+          <button type="button" class="btn-secondary" id="btn-redo-wrong" title="Revisão: refaz só as erradas, sem entrar na evolução da nota">Revisar erradas</button>
+          <button type="button" class="btn-secondary" id="btn-redo-wrong-guess" title="Revisão: refaz as erradas e os chutes">Revisar erradas + chutes</button>
           <button type="button" class="btn-primary" id="btn-new">Novo Simulado</button>
         </div>
         <div class="btn-group">

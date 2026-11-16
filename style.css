@@ -34,6 +34,7 @@ body {
 }
 .container { max-width: 850px; margin: 0 auto; transition: max-width .2s }
 .container.wide { max-width: 1340px }
+.container.medium { max-width: 1120px }
 .hidden { display: none !important }
 .muted { color: var(--muted); font-weight: 400 }
 code, kbd {
@@ -297,6 +298,37 @@ button:disabled { opacity: .5; cursor: not-allowed }
 
 /* ---------- Histórico ---------- */
 .hist-row { cursor: pointer; transition: background .12s }
+/* Linhas com altura fixa: tudo numa linha; o nome ocupa o espaço que sobra e termina em "…" */
+#history-list .data-table td { white-space: nowrap; height: 48px; vertical-align: middle }
+#history-list .data-table td.hist-title-cell { width: 100%; max-width: 0; min-width: 160px; overflow: hidden; text-overflow: ellipsis }
+#history-list .hist-row.editing td.hist-title-cell { overflow: visible; text-overflow: clip; max-width: none }
+#history-list .th-sort-btn { white-space: nowrap }
+#history-list .pct-bar { width: 44px }
+.rot-c, #history-list .tent-inline { display: none }
+/* Telas médias: esconde Modo, Tempo e o texto "Ver ›" */
+@media (min-width: 901px) and (max-width: 1100px) {
+  #history-list .col-opt:not(.col-marc) { display: none }
+}
+/* Tablet e celular: só o essencial (Data, Simulado, Acertos, %) */
+@media (max-width: 900px) {
+  #history-list .col-opt, #history-list .hist-hora { display: none }
+  #history-list .data-table th, #history-list .data-table td { padding: 8px 5px }
+  #history-list .th-sort-btn { padding: 8px 5px; letter-spacing: 0; font-size: .7rem }
+  #history-list .data-table td.hist-title-cell { min-width: 70px }
+  #history-list .rot-l, #history-list .col-tent, #history-list .hist-ano { display: none }
+  #history-list .tent-inline { display: inline-block; font-size: .72rem; padding: 0 5px; margin-right: 2px }
+  #history-list .rot-c { display: inline }
+  #history-list .btn-row-icon { padding: 4px 5px }
+  #history-list .pct-bar { display: none }
+  #history-list .evo-prev { display: none }
+  .hist-toolbar input[type="search"] { min-width: 0; width: 100% }
+}
+@media (max-width: 400px) {
+  #history-list .data-table { font-size: .8rem }
+  #history-list .data-table th, #history-list .data-table td { padding: 8px 3px }
+  #history-list .th-sort-btn { padding: 8px 3px }
+  #history-list .btn-row-icon { padding: 4px 3px }
+}
 .hist-row:hover, .hist-row:focus-visible { background: var(--primary-soft); outline: none }
 .hist-actions { white-space: nowrap; text-align: right }
 .th-sort { padding: 0 !important }
@@ -363,6 +395,49 @@ button:disabled { opacity: .5; cursor: not-allowed }
 .shortcuts td { padding: 7px 4px; border-bottom: 1px solid var(--border); vertical-align: top }
 .shortcuts td:first-child { white-space: nowrap; padding-right: 16px }
 
+/* ---------- Tentativas e evolução ---------- */
+.tent-count { display: inline-block; min-width: 26px; padding: 1px 7px; border-radius: 10px; background: var(--primary-soft); color: var(--primary); font-weight: 700 }
+.rev-count { font-size: .78rem }
+.evo { white-space: nowrap }
+.evo-prev { color: var(--muted); font-size: .8rem }
+.evo-arrow { font-size: .75rem }
+.evo-up { color: var(--success) } .evo-down { color: var(--danger) } .evo-eq { color: var(--muted) }
+.result-compare {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: var(--primary-soft); border: 1px solid var(--primary-border); border-radius: 8px;
+  padding: 10px 14px; margin: 12px 0 4px; font-size: .9rem;
+}
+.group-evolution { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: center; margin-bottom: 8px }
+.group-evolution .score-summary { margin: 8px 0 }
+@media (max-width: 760px) { .group-evolution { grid-template-columns: 1fr } }
+.evo-chart { width: 100%; max-width: 340px; height: auto }
+.evo-grid { stroke: var(--border); stroke-width: 1 }
+.evo-axis { fill: var(--muted); font-size: 10px }
+.evo-line { fill: none; stroke: var(--primary); stroke-width: 2.5 }
+.evo-pt { fill: var(--card); stroke: var(--primary); stroke-width: 2.5 }
+.evo-lbl { fill: var(--text); font-size: 10px; font-weight: 700 }
+
+.matrix th.mx-col { text-align: center; min-width: 54px }
+.matrix th.mx-rev { color: var(--warn) }
+.mx-row { cursor: pointer }
+.mx-row:hover, .mx-row:focus-visible { background: var(--surface); outline: none }
+.mx-row.open { background: var(--primary-soft) }
+.mx-q { white-space: nowrap }
+.mx-cell { text-align: center; font-weight: 700; font-size: .85rem; white-space: nowrap }
+.mx-cell sup { font-size: .6rem }
+.mx-certa { color: var(--success) }
+.mx-errada { color: var(--danger) }
+.mx-branco, .mx-na, .mx-anulada, .mx-sem-gabarito { color: var(--muted) }
+.mx-badge { font-size: .74rem; font-weight: 700; padding: 2px 8px; border-radius: 12px; white-space: nowrap; background: var(--surface) }
+.mx-badge.mx-errou-sempre { background: var(--danger-bg); color: var(--danger) }
+.mx-badge.mx-corrigiu { background: var(--success-bg); color: var(--success) }
+.mx-badge.mx-regrediu { background: var(--warn-bg); color: var(--warn) }
+.mx-badge.mx-sempre-acertou { color: var(--success) }
+.mx-detail td { background: var(--surface); padding: 14px 16px !important; white-space: normal }
+.mx-detail .enunciado { white-space: pre-line; margin-bottom: 8px; font-size: .92rem }
+.mx-hist-line { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 }
+.mx-hist { font-size: .8rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--card); border: 1px solid var(--border) }
+
 /* ---------- Sobre ---------- */
 .btn-icon { position: relative }
 .btn-icon.has-news::after {
@@ -412,3 +487,14 @@ button:disabled { opacity: .5; cursor: not-allowed }
   .modal-header, .modal-footer { border-radius: 0 }
   .score-box .num { font-size: 1.6rem }
 }
+
+/* Botão "⋯" e menu de ações da linha do histórico */
+.btn-row-menu { padding: 2px 10px; background: transparent; color: var(--text-soft); font-size: 1.15rem; font-weight: 700; line-height: 1; border-radius: 8px; opacity: .75; letter-spacing: 1px }
+.btn-row-menu:hover, .btn-row-menu.open, .btn-row-menu:focus-visible { opacity: 1; background: var(--surface) }
+.row-menu { position: fixed; z-index: 1000; min-width: 170px; padding: 4px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.28); display: flex; flex-direction: column }
+.row-menu[hidden] { display: none }
+.row-menu [role="menuitem"] { display: block; width: 100%; text-align: left; padding: 8px 12px; background: transparent; border: 0; border-radius: 6px; font-size: .9rem; color: inherit; cursor: pointer; white-space: nowrap }
+.row-menu [role="menuitem"]:hover, .row-menu [role="menuitem"]:focus-visible { background: var(--primary-soft); outline: none }
+.row-menu [role="menuitem"].danger { color: var(--danger) }
+.row-menu [role="menuitem"].danger:hover, .row-menu [role="menuitem"].danger:focus-visible { background: var(--danger-bg) }
+.row-menu-sep { height: 1px; margin: 4px 6px; background: var(--border) }

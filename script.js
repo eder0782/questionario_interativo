@@ -82,6 +82,28 @@
       .replace(/(^|[^\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])/g, '$1<em>$2</em>');
   }
 
+  /* Impressão digital do conjunto de questões (independe da ordem):
+     reconhece quando o mesmo simulado é importado de novo. */
+  function assinaturaQuestoes(qs) {
+    const partes = qs.map(q => [
+      q.key, q.enunciado,
+      LETRAS.split('').filter(l => q.alternativas[l]).map(l => l + ':' + q.alternativas[l]).join('|'),
+      q.gabarito ? q.gabarito.resposta : ''
+    ].join('¦')).sort();
+    const txt = partes.join('§');
+    let h = 0x811c9dc5; // FNV-1a 32 bits
+    for (let i = 0; i < txt.length; i++) { h ^= txt.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return `${qs.length}-${h.toString(16)}`;
+  }
+
+  // Vínculo de uma tentativa com o seu simulado (registros antigos: grupo próprio, tentativa 1)
+  const meta = r => ({
+    grupoId: (r && r.grupoId) || (r && r.id),
+    tipo: (r && r.tipo) || 'tentativa',
+    tentativa: (r && r.tentativa) || 1,
+    baseId: (r && r.baseId) || null
+  });
+
   const paragrafosHtml = texto => String(texto || '').split(/\n{2,}/).map(p => `<p>${fmt(p)}</p>`).join('');
 
   /* =========================================================
@@ -115,6 +137,9 @@
     'question-text', 'options-container', 'feedback',
     'btn-quit', 'btn-prev', 'btn-next', 'btn-finish',
     'pause-overlay', 'btn-unpause', 'map-pending', 'question-map',
+    'step-group', 'group-title', 'group-sub', 'btn-group-back', 'group-evolution', 'group-attempts',
+    'btn-group-redo', 'btn-group-review', 'group-filters', 'group-matrix', 'btn-copy-persist', 'btn-download-persist',
+    'result-compare',
     'result-title', 'score-summary', 'result-extra', 'module-table-wrap',
     'btn-back-history', 'result-date', 'btn-redo-all', 'btn-redo-wrong', 'btn-redo-wrong-guess', 'btn-new',
     'btn-copy-result', 'btn-download-result', 'result-filters', 'shuffle-note', 'result-list',
@@ -411,7 +436,8 @@ MÓDULO 2
     return `Simulado de ${fmtData(new Date().toISOString())}`;
   }
 
-  async function iniciarSimulado(questoes, { titulo, config }) {
+  async function iniciarSimulado(questoes, { titulo, config, vinculo = {} }) {
+    const assinatura = assinaturaQuestoes(questoes);
     const lista = config.embaralharQuestoes ? embaralhar(questoes) : questoes.slice();
     const ordemAlt = {};
     if (config.embaralharAlternativas) {
@@ -420,9 +446,16 @@ MÓDULO 2
       });
     }
     // Modelo do documento salvo — tudo JSON puro, pronto para Firestore
+    const id = uid();
     app.sessao = {
-      id: uid(),
+      id,
       status: 'andamento',
+      // Tentativas do mesmo simulado compartilham o grupoId; "revisao" = refazer só as erradas
+      grupoId: vinculo.grupoId || id,
+      tipo: vinculo.tipo || 'tentativa',
+      tentativa: vinculo.tipo === 'revisao' ? null : (vinculo.tentativa || 1),
+      baseId: vinculo.baseId || null,
+      assinatura,
       criadoEm: new Date().toISOString(),
       titulo,
       config,
@@ -455,8 +488,15 @@ MÓDULO 2
     const config = lerConfig();
     app.prefs.ultimaConfig = config;
     salvarPreferencias();
-    const titulo = els.inputTitle.value.trim() || tituloPadrao(a.questoes);
-    iniciarSimulado(clonar(a.questoes), { titulo, config });
+    let titulo = els.inputTitle.value.trim() || tituloPadrao(a.questoes);
+    let vinculo = {};
+    // Mesmo conjunto de questões já feito antes? Oferece registrar como nova tentativa
+    const g = grupoPorAssinatura(assinaturaQuestoes(a.questoes));
+    if (g && confirm(`Você já fez este simulado ("${g.titulo}"), pela última vez em ${fmtData(g.ultima.data)}.\n\nOK = registrar como nova tentativa (para comparar com as anteriores)\nCancelar = começar como um simulado novo`)) {
+      vinculo = { grupoId: g.grupoId, tipo: 'tentativa', tentativa: proximaTentativa(g.grupoId) };
+      titulo = g.titulo;
+    }
+    iniciarSimulado(clonar(a.questoes), { titulo, config, vinculo });
   });
 
   /* Retomar sessão salva */
@@ -497,8 +537,11 @@ MÓDULO 2
     els.stepImport.classList.toggle('hidden', nome !== 'import');
     els.stepQuiz.classList.toggle('hidden', nome !== 'quiz');
     els.stepResult.classList.toggle('hidden', nome !== 'result');
+    els.stepGroup.classList.toggle('hidden', nome !== 'group');
     const temTexto = nome === 'quiz' && app.sessao && app.sessao.questoes.some(q => q.textoBase);
     els.appContainer.classList.toggle('wide', !!temTexto);
+    // Tela inicial (histórico) e evolução (matriz) usam mais largura em telas grandes
+    els.appContainer.classList.toggle('medium', nome === 'import' || nome === 'group');
     els.quizLayout.classList.toggle('has-text', !!temTexto);
     window.scrollTo({ top: 0 });
   }
@@ -808,6 +851,7 @@ MÓDULO 2
   /* Finalizar */
   els.btnFinish.addEventListener('click', async () => {
     const s = app.sessao;
+    if (!s || s.status !== 'andamento') return;
     const pend = s.questoes.filter(q => !estaRespondida(q)).length;
     if (pend && !confirm(`Ainda há ${plural(pend, 'questão sem resposta', 'questões sem resposta')}. Elas contarão como "em branco". Finalizar mesmo assim?`)) return;
     pararRelogio();
@@ -829,8 +873,8 @@ MÓDULO 2
       console.error(e);
       toast('⚠ Resumo salvo, mas sem espaço para guardar os detalhes. Exclua simulados antigos do histórico.');
     }
+    await renderizarHistorico(); // atualiza os grupos antes de comparar com a tentativa anterior
     mostrarResultado();
-    renderizarHistorico();
   });
 
   /* =========================================================
@@ -877,7 +921,10 @@ MÓDULO 2
       chutesCertos: chutes.filter(i => i.sit === 'certa').length,
       ...contarMarcacoes(s),
       tempoTotal: s.tempoTotal || 0,
-      porModulo
+      porModulo,
+      ...meta(s),
+      tentativa: meta(s).tipo === 'revisao' ? null : meta(s).tentativa,
+      assinatura: s.assinatura || assinaturaQuestoes(s.questoes)
     };
   }
 
@@ -898,9 +945,13 @@ MÓDULO 2
     mostrarEtapa('result');
 
     els.resultTitle.textContent = `Resultado — ${s.titulo}`;
-    const doHistorico = app.origemResultado === 'historico';
-    els.btnBackHistory.classList.toggle('hidden', !doHistorico);
-    els.resultDate.textContent = `Finalizado em ${fmtData(r.data)} · modo ${r.modo}`;
+    const voltar = app.origemResultado === 'historico' || app.origemResultado === 'grupo';
+    els.btnBackHistory.classList.toggle('hidden', !voltar);
+    els.btnBackHistory.textContent = app.origemResultado === 'grupo' ? '← Voltar à evolução' : '← Voltar ao histórico';
+    const mm = meta(s);
+    const qual = mm.tipo === 'revisao' ? 'Revisão das erradas' : `Tentativa ${mm.tentativa}`;
+    els.resultDate.textContent = `${qual} · finalizado em ${fmtData(r.data)} · modo ${r.modo}`;
+    renderizarComparacao();
     const caixas = [
       ['correct', r.acertos, 'Acertos'],
       ['wrong', r.erros, 'Erros'],
@@ -941,9 +992,9 @@ MÓDULO 2
     const nErradas = s.questoes.filter(q => ['errada', 'branco'].includes(situacao(q))).length;
     const nErrChute = s.questoes.filter(q => ['errada', 'branco'].includes(situacao(q)) || (s.marcacoes[q.key] || {}).chute).length;
     els.btnRedoWrong.disabled = !nErradas;
-    els.btnRedoWrong.textContent = `Refazer erradas (${nErradas})`;
+    els.btnRedoWrong.textContent = `Revisar erradas (${nErradas})`;
     els.btnRedoWrongGuess.disabled = !nErrChute;
-    els.btnRedoWrongGuess.textContent = `Refazer erradas + chutes (${nErrChute})`;
+    els.btnRedoWrongGuess.textContent = `Revisar erradas + chutes (${nErrChute})`;
 
     els.shuffleNote.classList.toggle('hidden', !Object.keys(s.ordemAlt || {}).length);
     renderizarFiltros();
@@ -1020,7 +1071,8 @@ MÓDULO 2
 
   function textoResultado() {
     const s = app.sessao, r = app.resumo;
-    let t = `=== ${s.titulo} ===\n`;
+    const m = meta(s);
+    let t = `=== ${s.titulo} — ${m.tipo === 'revisao' ? 'revisão' : 'tentativa ' + m.tentativa} ===\n`;
     t += `Data: ${fmtData(r.data)} · Modo: ${r.modo}\n`;
     t += `Acertos: ${r.acertos} · Erros: ${r.erros} · Em branco: ${r.brancos} · Aproveitamento: ${r.percentual}%\n`;
     if (r.liquidoCE !== null) t += `Nota líquida C/E: ${r.liquidoCE} (de ${r.itensCE} itens)\n`;
@@ -1072,8 +1124,11 @@ MÓDULO 2
     if (tipo === 'erradas') qs = qs.filter(q => ['errada', 'branco'].includes(situacao(q)));
     if (tipo === 'erradas-chutes') qs = qs.filter(q => ['errada', 'branco'].includes(situacao(q)) || (s.marcacoes[q.key] || {}).chute);
     if (!qs.length) { toast('Nenhuma questão nesse filtro.'); return; }
-    const titulo = tipo === 'todas' ? s.titulo : `${s.titulo.replace(/ — revisão$/, '')} — revisão`;
-    iniciarSimulado(clonar(qs), { titulo, config: { ...s.config } });
+    const m = meta(s);
+    const vinculo = tipo === 'todas'
+      ? { grupoId: m.grupoId, tipo: 'tentativa', tentativa: proximaTentativa(m.grupoId) }
+      : { grupoId: m.grupoId, tipo: 'revisao', baseId: s.id }; // só as erradas: revisão, fora da evolução da nota
+    iniciarSimulado(clonar(qs), { titulo: s.titulo, config: { ...s.config }, vinculo });
   }
   els.btnRedoAll.addEventListener('click', () => refazer('todas'));
   els.btnRedoWrong.addEventListener('click', () => refazer('erradas'));
@@ -1087,6 +1142,7 @@ MÓDULO 2
   });
 
   els.btnBackHistory.addEventListener('click', () => {
+    if (app.origemResultado === 'grupo' && app.sessao) { const gid = meta(app.sessao).grupoId; app.sessao = null; app.resumo = null; abrirGrupo(gid); return; }
     app.sessao = null;
     app.resumo = null;
     mostrarEtapa('import');
@@ -1098,20 +1154,53 @@ MÓDULO 2
   /* =========================================================
      MÓDULO 10 — HISTÓRICO E BACKUP
      ========================================================= */
-  /* Estado da lista: todos os resumos ficam em memória; pesquisa e
-     paginação são feitas aqui, sem novas leituras no banco. */
-  const hist = { todos: [], busca: '', pagina: 1, porPagina: 5, editando: null, ordem: { campo: 'data', dir: 'desc' } };
+  /* Estado da lista: todos os resumos ficam em memória; agrupamento, pesquisa
+     e paginação são feitos aqui, sem novas leituras no banco.
+     Cada LINHA da tabela é um simulado (grupo), com as suas tentativas e revisões. */
+  const hist = { todos: [], grupos: [], busca: '', pagina: 1, porPagina: 5, editando: null, ordem: { campo: 'data', dir: 'desc' } };
 
-  /* Colunas ordenáveis: valor usado na comparação de cada uma */
+  const porData = (a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0);
+
+  function agruparHistorico(lista) {
+    const mapa = new Map();
+    for (const r of lista) {
+      const g = meta(r).grupoId;
+      if (!mapa.has(g)) mapa.set(g, []);
+      mapa.get(g).push(r);
+    }
+    return [...mapa.entries()].map(([grupoId, itens]) => {
+      itens.sort(porData);
+      const tentativas = itens.filter(r => meta(r).tipo === 'tentativa');
+      const revisoes = itens.filter(r => meta(r).tipo === 'revisao');
+      const ultima = tentativas[tentativas.length - 1] || itens[itens.length - 1];
+      const anterior = tentativas.length > 1 ? tentativas[tentativas.length - 2] : null;
+      return { grupoId, itens, tentativas, revisoes, ultima, anterior, titulo: ultima.titulo };
+    });
+  }
+
+  const grupoDe = grupoId => hist.grupos.find(g => g.grupoId === grupoId) || null;
+
+  function grupoPorAssinatura(assin) {
+    return hist.grupos.find(g => g.tentativas.some(r => r.assinatura && r.assinatura === assin)) || null;
+  }
+
+  function proximaTentativa(grupoId) {
+    const g = grupoDe(grupoId);
+    if (!g || !g.tentativas.length) return 1;
+    return Math.max(...g.tentativas.map(r => meta(r).tentativa)) + 1;
+  }
+
+  /* Colunas ordenáveis: valor usado na comparação (g = grupo; u = última tentativa) */
   const totalMarcacoes = r => (r.marcadasChute || 0) + (r.marcadasRevisar || 0);
   const COLUNAS_HIST = [
-    { campo: 'data', rotulo: 'Data', valor: r => r.data || '' },
-    { campo: 'titulo', rotulo: 'Simulado', valor: r => r.titulo || '', texto: true },
-    { campo: 'modo', rotulo: 'Modo', valor: r => r.modo || '', texto: true },
-    { campo: 'acertos', rotulo: 'Acertos', num: true, valor: r => r.acertos || 0 },
-    { campo: 'marcacoes', rotulo: '🎲+🚩', num: true, valor: totalMarcacoes, dica: 'Questões marcadas como chute ou para revisar (soma dos dois)' },
-    { campo: 'percentual', rotulo: '%', num: true, valor: r => r.percentual || 0 },
-    { campo: 'tempoTotal', rotulo: 'Tempo', num: true, valor: r => r.tempoTotal || 0 }
+    { campo: 'data', rotulo: 'Data', valor: g => g.ultima.data || '' },
+    { campo: 'titulo', rotulo: 'Simulado', valor: g => g.titulo || '', texto: true },
+    { campo: 'modo', rotulo: 'Modo', cls: 'col-opt', valor: g => g.ultima.modo || '', texto: true },
+    { campo: 'tentativas', rotulo: 'Tentativas', cls: 'col-tent', num: true, valor: g => g.tentativas.length * 1000 + g.revisoes.length, dica: 'Quantas vezes o simulado foi feito (e revisões das erradas)' },
+    { campo: 'acertos', rotulo: 'Acertos', curto: 'Acert.', num: true, valor: g => g.ultima.acertos || 0 },
+    { campo: 'marcacoes', rotulo: '🎲+🚩', cls: 'col-opt col-marc', num: true, valor: g => totalMarcacoes(g.ultima), dica: 'Questões marcadas como chute ou para revisar na última tentativa (soma dos dois)' },
+    { campo: 'percentual', rotulo: '%', num: true, valor: g => g.ultima.percentual || 0, dica: 'Nota da última tentativa e evolução em relação à anterior' },
+    { campo: 'tempoTotal', rotulo: 'Tempo', cls: 'col-opt', num: true, valor: g => g.ultima.tempoTotal || 0 }
   ];
   const comparaTexto = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
 
@@ -1122,7 +1211,7 @@ MÓDULO 2
       const va = col.valor(a), vb = col.valor(b);
       const r = col.texto ? comparaTexto.compare(va, vb) : (va < vb ? -1 : va > vb ? 1 : 0);
       if (r) return r * sinal;
-      return (a.data < b.data ? 1 : a.data > b.data ? -1 : 0); // desempate: mais recente primeiro
+      return -porData(a.ultima, b.ultima); // desempate: mais recente primeiro
     });
   }
 
@@ -1132,8 +1221,8 @@ MÓDULO 2
       const seta = ativa ? (hist.ordem.dir === 'asc' ? '▲' : '▼') : '';
       const aria = ativa ? (hist.ordem.dir === 'asc' ? 'ascending' : 'descending') : 'none';
       const dica = (c.dica ? c.dica + ' — ' : '') + 'Clique para ordenar';
-      return `<th class="${c.num ? 'num ' : ''}th-sort${ativa ? ' active' : ''}" aria-sort="${aria}">` +
-        `<button type="button" class="th-sort-btn" data-sort="${c.campo}" title="${esc(dica)}">${esc(c.rotulo)}<span class="sort-arrow" aria-hidden="true">${seta}</span></button></th>`;
+      return `<th class="${c.num ? 'num ' : ''}${c.cls ? c.cls + ' ' : ''}th-sort${ativa ? ' active' : ''}" aria-sort="${aria}">` +
+        `<button type="button" class="th-sort-btn" data-sort="${c.campo}" title="${esc(dica)}">${c.curto ? `<span class="rot-l">${esc(c.rotulo)}</span><span class="rot-c">${esc(c.curto)}</span>` : esc(c.rotulo)}<span class="sort-arrow" aria-hidden="true">${seta}</span></button></th>`;
     }).join('') + '<th><span class="sr-only">Ações</span></th>';
   }
 
@@ -1148,7 +1237,12 @@ MÓDULO 2
   }
 
   const normalizar = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-  const textoBusca = r => normalizar([r.titulo, fmtData(r.data), r.modo, ...(r.porModulo || []).map(m => m.nome)].join(' '));
+  const textoBusca = g => normalizar([
+    g.titulo,
+    ...g.itens.map(r => fmtData(r.data)),
+    g.ultima.modo,
+    ...(g.ultima.porModulo || []).map(m => m.nome)
+  ].join(' '));
 
   function destacar(texto, termo) {
     const seguro = esc(texto);
@@ -1163,23 +1257,29 @@ MÓDULO 2
   // Recarrega do banco e redesenha (após finalizar, excluir, importar, trocar de conta...)
   async function renderizarHistorico() {
     try { hist.todos = await Repo.listarHistorico(null); } catch (e) { console.error(e); hist.todos = []; }
+    hist.grupos = agruparHistorico(hist.todos);
     desenharHistorico();
-    if (await completarMarcacoes(hist.todos)) desenharHistorico();
+    if (await completarResumos(hist.todos)) { hist.grupos = agruparHistorico(hist.todos); desenharHistorico(); }
   }
 
-  // Simulados salvos antes desta versão não têm a contagem de marcações no resumo.
-  // Calcula uma única vez a partir dos detalhes e grava no resumo (migração).
+  // Resumos antigos sem a contagem de marcações ou sem a impressão digital das questões:
+  // calcula uma única vez a partir dos detalhes e grava no resumo (migração).
   let completando = false;
-  async function completarMarcacoes(lista) {
-    const faltando = lista.filter(r => r.marcadasChute === undefined);
+  async function completarResumos(lista) {
+    const faltando = lista.filter(r => r.marcadasChute === undefined || r.assinatura === undefined);
     if (!faltando.length || completando) return false;
     completando = true;
     try {
       for (const r of faltando) {
         let det = null;
         try { det = await Repo.carregarDetalhes(r.id); } catch (e) { console.error(e); }
-        if (det) Object.assign(r, contarMarcacoes(det));
-        else Object.assign(r, { marcadasChute: r.chutes || 0, marcadasRevisar: null }); // sem detalhes: revisar desconhecido
+        if (det) {
+          if (r.marcadasChute === undefined) Object.assign(r, contarMarcacoes(det));
+          r.assinatura = det.questoes && det.questoes.length ? assinaturaQuestoes(det.questoes) : null;
+        } else {
+          if (r.marcadasChute === undefined) Object.assign(r, { marcadasChute: r.chutes || 0, marcadasRevisar: null }); // sem detalhes
+          r.assinatura = null;
+        }
         try { await Repo.atualizarResumo(r); } catch (e) { console.error(e); }
       }
     } finally { completando = false; }
@@ -1197,14 +1297,41 @@ MÓDULO 2
     return `<span class="${total ? 'marc-count' : 'muted'}" title="🎲 ${ch} chute(s) · 🚩 ${rv} para revisar">${total}</span>`;
   }
 
+  // "15/11/26, 16:40" — no celular, só "15/11"
+  function celulaData(iso) {
+    const m = fmtData(iso).match(/^(\d{2}\/\d{2})(\/\d{2})(,.*)?$/);
+    if (!m) return esc(fmtData(iso));
+    return `${m[1]}<span class="hist-ano">${m[2]}</span><span class="hist-hora">${esc(m[3] || '')}</span>`;
+  }
+
+  function celulaTentativas(g) {
+    const n = g.tentativas.length, rv = g.revisoes.length;
+    const dica = `${plural(n, 'tentativa', 'tentativas')}${rv ? ' e ' + plural(rv, 'revisão', 'revisões') + ' das erradas' : ''}`;
+    if (n <= 1 && !rv) return `<span class="muted" title="${dica}">1</span>`;
+    return `<span class="tent-count" title="${dica}">${n}×</span>${rv ? ` <span class="muted rev-count">+${rv} rev.</span>` : ''}`;
+  }
+
+  // "80% → 90% ▲": nota da última tentativa e evolução em relação à anterior
+  function celulaPercentual(g) {
+    const p = g.ultima.percentual || 0;
+    const barra = `<span class="pct-bar ${classePct(p)}"><i style="width:${p}%"></i></span>`;
+    if (!g.anterior) return `${barra}${p}%`;
+    const a = g.anterior.percentual || 0;
+    const d = p - a;
+    const cls = d > 0 ? 'evo-up' : d < 0 ? 'evo-down' : 'evo-eq';
+    const seta = d > 0 ? '▲' : d < 0 ? '▼' : '=';
+    return `${barra}<span class="evo ${cls}" title="Tentativa anterior: ${a}% · variação: ${d > 0 ? '+' : ''}${d} p.p.">` +
+      `<span class="evo-prev">${a}% →</span> ${p}% <span class="evo-arrow">${seta}</span></span>`;
+  }
+
   function filtrarHistorico() {
     const termos = normalizar(hist.busca).split(/\s+/).filter(Boolean);
-    if (!termos.length) return hist.todos;
-    return hist.todos.filter(r => { const t = textoBusca(r); return termos.every(x => t.includes(x)); });
+    if (!termos.length) return hist.grupos;
+    return hist.grupos.filter(g => { const t = textoBusca(g); return termos.every(x => t.includes(x)); });
   }
 
   function desenharHistorico() {
-    const temAlgum = hist.todos.length > 0;
+    const temAlgum = hist.grupos.length > 0;
     els.histToolbar.classList.toggle('hidden', !temAlgum);
     if (!temAlgum) {
       els.historyList.innerHTML = '<p class="empty-list">Nenhum simulado finalizado ainda.</p>';
@@ -1230,28 +1357,30 @@ MÓDULO 2
     els.historyList.innerHTML = `
       <div class="table-scroll"><table class="data-table">
         <thead><tr>${cabecalhoHistorico()}</tr></thead>
-        <tbody>${pagina.map(r => {
-          const editando = hist.editando === r.id;
+        <tbody>${pagina.map(g => {
+          const r = g.ultima;
+          const id = g.grupoId;
+          const editando = hist.editando === id;
           const ce = r.liquidoCE !== null && r.liquidoCE !== undefined ? ` <span class="muted">· líquida C/E: ${r.liquidoCE}</span>` : '';
+          const varias = g.itens.length > 1;
           const tituloHtml = editando
             ? `<span class="hist-edit">
-                 <input type="text" class="hist-edit-input" data-edit-input="${esc(r.id)}" value="${esc(r.titulo)}" maxlength="120" aria-label="Novo nome do simulado">
-                 <button type="button" class="btn-row-icon ok" data-save="${esc(r.id)}" title="Salvar (Enter)" aria-label="Salvar nome">✓</button>
-                 <button type="button" class="btn-row-icon" data-cancel="${esc(r.id)}" title="Cancelar (Esc)" aria-label="Cancelar">✕</button>
+                 <input type="text" class="hist-edit-input" data-edit-input="${esc(id)}" value="${esc(g.titulo)}" maxlength="120" aria-label="Novo nome do simulado">
+                 <button type="button" class="btn-row-icon ok" data-save="${esc(id)}" title="Salvar (Enter)" aria-label="Salvar nome">✓</button>
+                 <button type="button" class="btn-row-icon" data-cancel="${esc(id)}" title="Cancelar (Esc)" aria-label="Cancelar">✕</button>
                </span>`
-            : `<span class="hist-title">${destacar(r.titulo, termoUnico)}</span>${ce}`;
+            : `${g.itens.length > 1 ? `<span class="tent-inline tent-count">${g.tentativas.length}×</span> ` : ''}<span class="hist-title">${destacar(g.titulo, termoUnico)}</span>${ce}`;
           return `
-          <tr class="hist-row${editando ? ' editing' : ''}" data-id="${esc(r.id)}" ${editando ? '' : 'tabindex="0" role="button" title="Ver detalhes deste simulado"'}>
-            <td>${esc(fmtData(r.data))}</td>
-            <td>${tituloHtml}</td>
-            <td>${esc(r.modo)}</td>
+          <tr class="hist-row${editando ? ' editing' : ''}" data-id="${esc(id)}" ${editando ? '' : `tabindex="0" role="button" title="${varias ? 'Ver a evolução e comparar as tentativas' : 'Ver detalhes deste simulado'}"`}>
+            <td>${celulaData(r.data)}</td>
+            <td class="hist-title-cell"${editando ? '' : ` title="${esc(g.titulo)}"`}>${tituloHtml}</td>
+            <td class="col-opt">${esc(r.modo)}</td>
+            <td class="num col-tent">${celulaTentativas(g)}</td>
             <td class="num">${r.acertos}/${r.consideradas}</td>
-            <td class="num">${celulaMarcacoes(r)}</td>
-            <td class="num"><span class="pct-bar ${classePct(r.percentual)}"><i style="width:${r.percentual}%"></i></span>${r.percentual}%</td>
-            <td class="num">${fmtTempo(r.tempoTotal)}</td>
-            <td class="hist-actions">${editando ? '' : `<span class="hist-open">Ver ›</span>
-              <button type="button" class="btn-row-icon" data-edit="${esc(r.id)}" title="Renomear" aria-label="Renomear simulado">✏️</button>
-              <button type="button" class="btn-row-icon danger" data-del="${esc(r.id)}" title="Excluir do histórico" aria-label="Excluir do histórico">🗑</button>`}</td>
+            <td class="num col-opt col-marc">${celulaMarcacoes(r)}</td>
+            <td class="num">${celulaPercentual(g)}</td>
+            <td class="num col-opt">${fmtTempo(r.tempoTotal)}</td>
+            <td class="hist-actions">${editando ? '' : `<button type="button" class="btn-row-menu" data-menu="${esc(id)}" title="Ações" aria-label="Ações do simulado" aria-haspopup="menu" aria-expanded="false">⋯</button>`}</td>
           </tr>`;
         }).join('')}
         </tbody></table></div>`;
@@ -1307,18 +1436,19 @@ MÓDULO 2
     desenharHistorico();
   });
 
-  async function salvarTitulo(id) {
+  // Renomeia o simulado inteiro (todas as tentativas e revisões)
+  async function salvarTitulo(grupoId) {
     const inp = els.historyList.querySelector('.hist-edit-input'); // só uma linha é editada por vez
     if (!inp) return;
     const novo = inp.value.replace(/\s+/g, ' ').trim();
-    const reg = hist.todos.find(r => r.id === id);
+    const g = grupoDe(grupoId);
     if (!novo) { toast('O nome não pode ficar vazio.'); inp.focus(); return; }
-    if (reg && novo === reg.titulo) { hist.editando = null; desenharHistorico(); return; }
+    if (!g || novo === g.titulo) { hist.editando = null; desenharHistorico(); return; }
     inp.disabled = true;
     try {
-      await Repo.renomearResultado(id, novo);
-      if (reg) reg.titulo = novo;
-      if (app.sessao && app.sessao.id === id) { app.sessao.titulo = novo; els.resultTitle.textContent = `Resultado — ${novo}`; }
+      for (const r of g.itens) { await Repo.renomearResultado(r.id, novo); r.titulo = novo; }
+      g.titulo = novo;
+      if (app.sessao && meta(app.sessao).grupoId === grupoId) { app.sessao.titulo = novo; els.resultTitle.textContent = `Resultado — ${novo}`; }
       hist.editando = null;
       desenharHistorico();
       toast('✅ Nome atualizado.');
@@ -1329,7 +1459,7 @@ MÓDULO 2
     }
   }
 
-  async function abrirDoHistorico(id) {
+  async function abrirDoHistorico(id, origem = 'historico') {
     let det = null;
     try { det = await Repo.carregarDetalhes(id); } catch (e) { console.error(e); }
     if (!det) {
@@ -1339,29 +1469,122 @@ MÓDULO 2
     app.sessao = det;
     app.resumo = calcularResumo(det);
     app.filtro = 'todas';
-    app.origemResultado = 'historico';
+    app.origemResultado = origem;
     mostrarResultado();
   }
+
+  // Simulado feito uma vez só: abre o resultado; com tentativas ou revisões: abre a evolução
+  function abrirLinha(grupoId) {
+    const g = grupoDe(grupoId);
+    if (!g) return;
+    if (g.itens.length === 1) abrirDoHistorico(g.itens[0].id);
+    else abrirGrupo(grupoId);
+  }
+
+  async function excluirGrupo(grupoId) {
+    const g = grupoDe(grupoId);
+    if (!g) return;
+    const n = g.itens.length;
+    if (!confirm(n > 1 ? `Excluir este simulado e as suas ${n} tentativas/revisões do histórico?` : 'Excluir este simulado do histórico?')) return;
+    for (const r of g.itens) await Repo.excluirResultado(r.id);
+    await renderizarHistorico();
+    toast('Simulado excluído do histórico.');
+  }
+
+  /* ---- Menu "⋯" de ações da linha (fica no <body> para não ser cortado pela rolagem da tabela) ---- */
+  const menuLinha = document.createElement('div');
+  menuLinha.className = 'row-menu';
+  menuLinha.setAttribute('role', 'menu');
+  menuLinha.hidden = true;
+  document.body.appendChild(menuLinha);
+  let menuDono = null;
+
+  function fecharMenuLinha(devolverFoco = false) {
+    if (menuLinha.hidden) return;
+    menuLinha.hidden = true;
+    if (menuDono) {
+      menuDono.setAttribute('aria-expanded', 'false');
+      menuDono.classList.remove('open');
+      if (devolverFoco && document.body.contains(menuDono)) menuDono.focus();
+    }
+    menuDono = null;
+  }
+
+  function alternarMenuLinha(btn) {
+    if (menuDono === btn && !menuLinha.hidden) { fecharMenuLinha(); return; }
+    fecharMenuLinha();
+    const id = btn.dataset.menu;
+    const g = grupoDe(id);
+    if (!g) return;
+    const varias = g.itens.length > 1;
+    menuLinha.innerHTML = `
+      <button type="button" role="menuitem" data-act="abrir" data-id="${esc(id)}">${varias ? '📈 Ver evolução' : '👁 Ver detalhes'}</button>
+      <button type="button" role="menuitem" data-act="renomear" data-id="${esc(id)}">✏️ Renomear</button>
+      <div class="row-menu-sep" role="separator"></div>
+      <button type="button" role="menuitem" class="danger" data-act="excluir" data-id="${esc(id)}">🗑 Excluir</button>`;
+    menuLinha.hidden = false;
+    menuDono = btn;
+    btn.setAttribute('aria-expanded', 'true');
+    btn.classList.add('open');
+    posicionarMenuLinha();
+    const primeiro = menuLinha.querySelector('[role="menuitem"]');
+    if (primeiro) primeiro.focus({ preventScroll: true });
+  }
+
+  // Alinha o menu à direita do botão; abre para cima se não couber embaixo
+  function posicionarMenuLinha() {
+    if (menuLinha.hidden || !menuDono) return;
+    const r = menuDono.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+    if (!document.body.contains(menuDono) || r.bottom < 0 || r.top > vh) { fecharMenuLinha(); return; }
+    const mw = menuLinha.offsetWidth, mh = menuLinha.offsetHeight;
+    const left = Math.min(Math.max(8, r.right - mw), vw - mw - 8);
+    let top = r.bottom + 4;
+    if (top + mh > vh - 8 && r.top - mh - 4 > 8) top = r.top - mh - 4;
+    menuLinha.style.left = left + 'px';
+    menuLinha.style.top = top + 'px';
+  }
+
+  menuLinha.addEventListener('click', e => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    const { act, id } = b.dataset;
+    fecharMenuLinha();
+    if (act === 'abrir') abrirLinha(id);
+    else if (act === 'renomear') { hist.editando = id; desenharHistorico(); }
+    else if (act === 'excluir') excluirGrupo(id);
+  });
+
+  menuLinha.addEventListener('keydown', e => {
+    const itens = [...menuLinha.querySelectorAll('[role="menuitem"]')];
+    const i = itens.indexOf(document.activeElement);
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fecharMenuLinha(true); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); itens[(i + 1) % itens.length].focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); itens[(i - 1 + itens.length) % itens.length].focus(); }
+    else if (e.key === 'Home') { e.preventDefault(); itens[0].focus(); }
+    else if (e.key === 'End') { e.preventDefault(); itens[itens.length - 1].focus(); }
+    else if (e.key === 'Tab') fecharMenuLinha();
+  });
+
+  document.addEventListener('mousedown', e => {
+    if (menuLinha.hidden) return;
+    if (menuLinha.contains(e.target) || (menuDono && menuDono.contains(e.target))) return;
+    fecharMenuLinha();
+  });
+  window.addEventListener('resize', () => fecharMenuLinha());
+  window.addEventListener('scroll', posicionarMenuLinha, true);
 
   els.historyList.addEventListener('click', async e => {
     const t = e.target;
     const sortBtn = t.closest('[data-sort]');
     if (sortBtn) { alternarOrdem(sortBtn.dataset.sort); return; }
-    const del = t.closest('[data-del]');
-    if (del) {
-      if (!confirm('Excluir este simulado do histórico?')) return;
-      await Repo.excluirResultado(del.dataset.del);
-      await renderizarHistorico();
-      toast('Simulado excluído do histórico.');
-      return;
-    }
-    const edit = t.closest('[data-edit]');
-    if (edit) { hist.editando = edit.dataset.edit; desenharHistorico(); return; }
+    const menuBtn = t.closest('[data-menu]');
+    if (menuBtn) { alternarMenuLinha(menuBtn); return; }
     const save = t.closest('[data-save]');
     if (save) { salvarTitulo(save.dataset.save); return; }
     if (t.closest('[data-cancel]')) { hist.editando = null; desenharHistorico(); return; }
     const row = t.closest('.hist-row');
-    if (row && !row.classList.contains('editing')) abrirDoHistorico(row.dataset.id);
+    if (row && !row.classList.contains('editing')) abrirLinha(row.dataset.id);
   });
 
   els.historyList.addEventListener('keydown', e => {
@@ -1374,8 +1597,356 @@ MÓDULO 2
     const row = e.target.closest('.hist-row');
     if (row && e.target === row && (e.key === 'Enter' || e.key === ' ')) {
       e.preventDefault();
-      abrirDoHistorico(row.dataset.id);
+      abrirLinha(row.dataset.id);
     }
+  });
+
+  /* =========================================================
+     MÓDULO 10-B — EVOLUÇÃO DE UM SIMULADO (tentativas, revisões e matriz)
+     ========================================================= */
+  const evo = { grupoId: null, colunas: [], linhas: [], filtro: 'todas', aberta: null };
+
+  const ROTULO_CLASSE = {
+    'errou-sempre': '❌ Errou sempre',
+    'corrigiu': '✅ Corrigiu',
+    'regrediu': '⚠️ Regrediu',
+    'sempre-acertou': '✔️ Sempre acertou',
+    'sem-dados': '— Sem resposta'
+  };
+  const DICA_CLASSE = {
+    'errou-sempre': 'Errou (ou deixou em branco) em todas as vezes: prioridade de revisão',
+    'corrigiu': 'Errou antes e acertou na última vez',
+    'regrediu': 'Acertou antes e errou na última vez: conhecimento frágil ou chute',
+    'sempre-acertou': 'Acertou todas as vezes'
+  };
+
+  // Ordem natural das questões: módulo, número, ocorrência
+  function chaveOrdem(q) {
+    const occ = parseInt(String(q.key).split('#')[1] || '1', 10);
+    return [q.moduloIdx || 0, q.numero || 0, occ];
+  }
+  const comparaQuestao = (a, b) => {
+    const x = chaveOrdem(a), y = chaveOrdem(b);
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i];
+    return 0;
+  };
+
+  function classificar(seq) {
+    const v = seq.filter(x => x === 'certa' || x === 'errada' || x === 'branco');
+    if (!v.length) return 'sem-dados';
+    const ok = v.map(x => x === 'certa');
+    if (ok.every(Boolean)) return 'sempre-acertou';
+    if (!ok.some(Boolean)) return 'errou-sempre';
+    return ok[ok.length - 1] ? 'corrigiu' : 'regrediu';
+  }
+
+  async function abrirGrupo(grupoId) {
+    const g = grupoDe(grupoId);
+    if (!g) { toast('Simulado não encontrado no histórico.'); return; }
+    evo.grupoId = grupoId;
+    evo.filtro = 'todas';
+    evo.aberta = null;
+
+    // Detalhes de cada tentativa/revisão (lidos só ao abrir esta tela)
+    const dets = await Promise.all(g.itens.map(r => Repo.carregarDetalhes(r.id).catch(() => null)));
+    let nRev = 0;
+    evo.colunas = g.itens.map((r, i) => {
+      const m = meta(r);
+      const rotulo = m.tipo === 'revisao' ? `R${++nRev}` : `T${m.tentativa}`;
+      return { r, det: dets[i], rotulo, tipo: m.tipo };
+    });
+
+    // Linhas: união das questões de todas as tentativas, na ordem natural
+    const mapa = new Map();
+    evo.colunas.forEach(c => {
+      if (!c.det) return;
+      c.det.questoes.forEach(q => { mapa.set(q.key, q); }); // fica a versão mais recente da questão
+    });
+    evo.linhas = [...mapa.values()].sort(comparaQuestao).map(q => {
+      const celulas = evo.colunas.map(c => {
+        if (!c.det) return null;
+        const qq = c.det.questoes.find(x => x.key === q.key);
+        if (!qq) return null;
+        return { sit: situacao(qq, c.det), resp: c.det.respostas[q.key] || null, chute: !!(c.det.marcacoes[q.key] || {}).chute, q: qq };
+      });
+      const classe = classificar(celulas.filter(Boolean).map(x => x.sit));
+      return { q, celulas, classe };
+    });
+
+    renderizarGrupo();
+    mostrarEtapa('group');
+  }
+
+  function evolucaoSvg(tentativas) {
+    if (tentativas.length < 2) return '';
+    const W = 320, H = 120, px = 30, py = 18;
+    const n = tentativas.length;
+    const x = i => px + (n === 1 ? 0 : i * (W - 2 * px) / (n - 1));
+    const y = p => H - py - (p / 100) * (H - 2 * py);
+    const pts = tentativas.map((r, i) => [x(i), y(r.percentual || 0), r]);
+    const linha = pts.map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(' ');
+    const guias = [0, 50, 100].map(p => `<line x1="${px}" x2="${W - px}" y1="${y(p)}" y2="${y(p)}" class="evo-grid"/><text x="4" y="${y(p) + 4}" class="evo-axis">${p}%</text>`).join('');
+    const pontos = pts.map(([a, b, r], i) =>
+      `<circle cx="${a}" cy="${b}" r="4.5" class="evo-pt"><title>T${meta(r).tentativa}: ${r.percentual}% (${fmtData(r.data)})</title></circle>` +
+      `<text x="${a}" y="${b - 9}" text-anchor="middle" class="evo-lbl">${r.percentual}%</text>` +
+      `<text x="${a}" y="${H - 2}" text-anchor="middle" class="evo-axis">T${meta(r).tentativa}</text>`).join('');
+    return `<svg class="evo-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolução da nota por tentativa">${guias}<polyline points="${linha}" class="evo-line"/>${pontos}</svg>`;
+  }
+
+  function renderizarGrupo() {
+    const g = grupoDe(evo.grupoId);
+    if (!g) return;
+    const T = g.tentativas;
+    els.groupTitle.textContent = `Evolução — ${g.titulo}`;
+    els.groupSub.textContent = `${plural(T.length, 'tentativa', 'tentativas')}` +
+      (g.revisoes.length ? ` · ${plural(g.revisoes.length, 'revisão', 'revisões')} das erradas` : '') +
+      ` · primeira em ${fmtData(g.itens[0].data)}`;
+
+    // Resumo: última nota, variação, melhor nota + gráfico
+    const ult = g.ultima, ant = g.anterior;
+    const melhor = T.length ? Math.max(...T.map(r => r.percentual || 0)) : (ult.percentual || 0);
+    const d = ant ? (ult.percentual || 0) - (ant.percentual || 0) : null;
+    const caixas = [
+      ['percent', `${ult.percentual}%`, `Última tentativa (T${meta(ult).tentativa})`],
+      ...(d !== null ? [[d > 0 ? 'correct' : d < 0 ? 'wrong' : 'blank', `${d > 0 ? '+' : ''}${d} p.p.`, `Variação desde T${meta(ant).tentativa}`]] : []),
+      ['', `${melhor}%`, 'Melhor nota'],
+      ['', `${T.length}`, 'Tentativas']
+    ];
+    els.groupEvolution.innerHTML =
+      `<div class="score-summary">${caixas.map(([c, n, l]) => `<div class="score-box ${c}"><span class="num">${esc(n)}</span><span class="label">${esc(l)}</span></div>`).join('')}</div>` +
+      evolucaoSvg(T);
+
+    // Lista de tentativas e revisões
+    els.groupAttempts.innerHTML = `
+      <div class="table-scroll"><table class="data-table">
+        <thead><tr><th></th><th>Data</th><th class="num">Acertos</th><th class="num">%</th><th class="num">🎲+🚩</th><th class="num">Tempo</th><th><span class="sr-only">Ações</span></th></tr></thead>
+        <tbody>${evo.colunas.map(c => {
+          const r = c.r;
+          const nome = c.tipo === 'revisao'
+            ? `<strong>${c.rotulo}</strong> <span class="muted">revisão${r.baseId ? ` de ${esc((evo.colunas.find(x => x.r.id === r.baseId) || {}).rotulo || 'tentativa')}` : ''} · ${r.total} questões</span>`
+            : `<strong>${c.rotulo}</strong> <span class="muted">tentativa ${meta(r).tentativa}</span>`;
+          return `<tr>
+            <td>${nome}</td>
+            <td>${esc(fmtData(r.data))}</td>
+            <td class="num">${r.acertos}/${r.consideradas}</td>
+            <td class="num"><span class="pct-bar ${classePct(r.percentual)}"><i style="width:${r.percentual}%"></i></span>${r.percentual}%</td>
+            <td class="num">${celulaMarcacoes(r)}</td>
+            <td class="num">${fmtTempo(r.tempoTotal)}</td>
+            <td class="hist-actions">
+              ${c.det ? `<button type="button" class="btn-secondary btn-small" data-ver="${esc(r.id)}">Ver resultado</button>` : '<span class="muted" title="Simulado antigo, sem detalhes salvos">sem detalhes</span>'}
+              <button type="button" class="btn-row-icon danger" data-del-item="${esc(r.id)}" title="Excluir esta ${c.tipo === 'revisao' ? 'revisão' : 'tentativa'}" aria-label="Excluir">🗑</button>
+            </td></tr>`;
+        }).join('')}</tbody></table></div>`;
+
+    renderizarMatriz();
+  }
+
+  function renderizarMatriz() {
+    const linhas = evo.linhas;
+    const conta = c => linhas.filter(l => l.classe === c).length;
+    const filtros = [['todas', 'Todas', linhas.length], ...['errou-sempre', 'corrigiu', 'regrediu', 'sempre-acertou'].map(c => [c, ROTULO_CLASSE[c], conta(c)])];
+    els.groupFilters.innerHTML = filtros.map(([id, nome, n]) =>
+      `<button type="button" role="tab" data-evo-filtro="${id}" aria-selected="${evo.filtro === id}" title="${esc(DICA_CLASSE[id] || '')}">${esc(nome)} (${n})</button>`).join('');
+
+    const vis = evo.filtro === 'todas' ? linhas : linhas.filter(l => l.classe === evo.filtro);
+    els.btnCopyPersist.disabled = !conta('errou-sempre');
+    els.btnDownloadPersist.disabled = !conta('errou-sempre');
+    els.btnGroupReview.disabled = !linhas.some(l => l.classe === 'errou-sempre' || l.classe === 'regrediu');
+
+    if (!linhas.length) {
+      els.groupMatrix.innerHTML = '<p class="empty-list">Sem detalhes salvos para comparar (simulados antigos guardavam só o resumo).</p>';
+      return;
+    }
+    if (!vis.length) { els.groupMatrix.innerHTML = '<p class="empty-list">Nenhuma questão neste filtro.</p>'; return; }
+
+    const cab = evo.colunas.map(c => `<th class="mx-col${c.tipo === 'revisao' ? ' mx-rev' : ''}" title="${esc(fmtData(c.r.data))}">${c.rotulo}</th>`).join('');
+    const nCols = evo.colunas.length + 2;
+    els.groupMatrix.innerHTML = `
+      <div class="table-scroll"><table class="data-table matrix">
+        <thead><tr><th>Questão</th>${cab}<th>Situação</th></tr></thead>
+        <tbody>${vis.map(l => {
+          const k = l.q.key;
+          const aberta = evo.aberta === k;
+          const cels = l.celulas.map((c, i) => {
+            if (!c) return `<td class="mx-cell mx-na" title="Não fez parte desta ${evo.colunas[i].tipo === 'revisao' ? 'revisão' : 'tentativa'}">·</td>`;
+            const letra = c.resp ? nomeResposta(c.q, c.resp) : '—';
+            const curta = c.q.tipo === 'ce' && c.resp ? c.resp : letra;
+            const simb = c.sit === 'certa' ? '✓' : c.sit === 'errada' ? '✗' : c.sit === 'branco' ? '○' : '∅';
+            return `<td class="mx-cell mx-${c.sit}" title="${esc(evo.colunas[i].rotulo)}: ${esc(letra)} — ${esc(ROTULO_SIT[c.sit])}${c.chute ? ' (chute)' : ''}">${simb} ${esc(curta)}${c.chute ? '<sup>🎲</sup>' : ''}</td>`;
+          }).join('');
+          const det = aberta ? `<tr class="mx-detail"><td colspan="${nCols}">${detalheQuestao(l)}</td></tr>` : '';
+          return `<tr class="mx-row${aberta ? ' open' : ''}" data-mx="${esc(k)}" tabindex="0" role="button" aria-expanded="${aberta}">
+            <td class="mx-q"><strong>Q${l.q.numero}</strong>${l.q.modulo ? ` <span class="muted">${esc(l.q.modulo.replace(/^M[ÓO]DULO\s*\d+\s*[—–-]\s*/i, ''))}</span>` : ''}</td>
+            ${cels}
+            <td><span class="mx-badge mx-${l.classe}" title="${esc(DICA_CLASSE[l.classe] || '')}">${esc(ROTULO_CLASSE[l.classe])}</span></td>
+          </tr>${det}`;
+        }).join('')}</tbody></table></div>`;
+  }
+
+  function detalheQuestao(l) {
+    const q = l.q, g = q.gabarito;
+    const opcoes = LETRAS.split('').filter(x => q.alternativas[x]).map(x =>
+      `<div class="opt${g && g.resposta === x ? ' correct' : ''}">(${x}) ${fmt(q.alternativas[x])}</div>`).join('');
+    const respostas = l.celulas.map((c, i) => c
+      ? `<span class="mx-hist mx-${c.sit}">${esc(evo.colunas[i].rotulo)}: ${esc(c.resp ? nomeResposta(c.q, c.resp) : '—')} ${c.sit === 'certa' ? '✓' : c.sit === 'errada' ? '✗' : c.sit === 'branco' ? '○' : ''}${c.chute ? ' 🎲' : ''}</span>`
+      : '').join('');
+    const com = g ? `<div class="comment"><strong>Gabarito:</strong> (${esc(nomeResposta(q, g.resposta))})${g.comentario ? ' — ' + fmt(g.comentario) : ''}</div>` : '';
+    return `${q.comando ? `<div class="comando">${fmt(q.comando)}</div>` : ''}
+      <div class="enunciado">${fmt(q.enunciado)}</div>
+      ${q.tipo === 'multipla' ? `<div class="result-options">${opcoes}</div>` : ''}
+      <div class="mx-hist-line">${respostas}</div>${com}`;
+  }
+
+  els.groupFilters.addEventListener('click', e => {
+    const b = e.target.closest('[data-evo-filtro]');
+    if (!b) return;
+    evo.filtro = b.dataset.evoFiltro;
+    evo.aberta = null;
+    renderizarMatriz();
+  });
+
+  function alternarLinhaMatriz(k) {
+    evo.aberta = evo.aberta === k ? null : k;
+    renderizarMatriz();
+    const row = els.groupMatrix.querySelector(`[data-mx="${k}"]`); // chaves são só "número#ocorrência"
+    if (row) row.focus({ preventScroll: true });
+  }
+  els.groupMatrix.addEventListener('click', e => {
+    const row = e.target.closest('[data-mx]');
+    if (row) alternarLinhaMatriz(row.dataset.mx);
+  });
+  els.groupMatrix.addEventListener('keydown', e => {
+    const row = e.target.closest('[data-mx]');
+    if (row && e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); alternarLinhaMatriz(row.dataset.mx); }
+  });
+
+  els.groupAttempts.addEventListener('click', async e => {
+    const ver = e.target.closest('[data-ver]');
+    if (ver) { abrirDoHistorico(ver.dataset.ver, 'grupo'); return; }
+    const del = e.target.closest('[data-del-item]');
+    if (del) {
+      if (!confirm('Excluir esta tentativa do histórico? As demais continuam.')) return;
+      await Repo.excluirResultado(del.dataset.delItem);
+      await renderizarHistorico();
+      const ainda = grupoDe(evo.grupoId);
+      if (ainda && ainda.itens.length > 1) abrirGrupo(evo.grupoId);
+      else { mostrarEtapa('import'); verificarSessaoPendente(); }
+      toast('Tentativa excluída.');
+    }
+  });
+
+  els.btnGroupBack.addEventListener('click', () => {
+    mostrarEtapa('import');
+    verificarSessaoPendente();
+    const card = els.historyList.closest('.card');
+    if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start' });
+  });
+
+  // Nova tentativa com as questões completas da última tentativa
+  async function iniciarDoGrupo(tipo) {
+    const g = grupoDe(evo.grupoId);
+    if (!g) return;
+    const colUlt = [...evo.colunas].reverse().find(c => c.tipo === 'tentativa' && c.det);
+    if (!colUlt) { toast('Não há detalhes salvos para refazer este simulado.'); return; }
+    if (app.sessaoPendente) {
+      if (!confirm('Há um simulado em andamento salvo. Começar este vai descartá-lo. Continuar?')) return;
+      await Repo.excluirSessoesEmAndamento();
+      app.sessaoPendente = null;
+      els.resumeCard.classList.add('hidden');
+    }
+    let qs, vinculo;
+    if (tipo === 'tentativa') {
+      qs = colUlt.det.questoes;
+      vinculo = { grupoId: g.grupoId, tipo: 'tentativa', tentativa: proximaTentativa(g.grupoId) };
+    } else {
+      const chaves = new Set(evo.linhas.filter(l => l.classe === 'errou-sempre' || l.classe === 'regrediu').map(l => l.q.key));
+      qs = evo.linhas.filter(l => chaves.has(l.q.key)).map(l => l.q);
+      if (!qs.length) { toast('Nenhuma questão em "errou sempre" ou "regrediu".'); return; }
+      vinculo = { grupoId: g.grupoId, tipo: 'revisao', baseId: colUlt.r.id };
+    }
+    iniciarSimulado(clonar(qs), { titulo: g.titulo, config: { ...colUlt.det.config }, vinculo });
+  }
+  els.btnGroupRedo.addEventListener('click', () => iniciarDoGrupo('tentativa'));
+  els.btnGroupReview.addEventListener('click', () => iniciarDoGrupo('revisao'));
+
+  // Exporta as questões que você errou em todas as vezes (para o caderno de erros / Anki)
+  function textoErrouSempre() {
+    const g = grupoDe(evo.grupoId);
+    const lst = evo.linhas.filter(l => l.classe === 'errou-sempre');
+    let t = `=== ${g ? g.titulo : 'Simulado'} — questões que errou em todas as tentativas (${lst.length}) ===\n\n`;
+    lst.forEach(l => {
+      const q = l.q, gb = q.gabarito;
+      const respostas = l.celulas.map((c, i) => c ? `${evo.colunas[i].rotulo}: ${c.resp ? nomeResposta(c.q, c.resp) : '—'}` : null).filter(Boolean).join(' · ');
+      t += `Questão ${q.numero}${q.modulo ? ` (${q.modulo})` : ''} — suas respostas: ${respostas}\n`;
+      if (q.comando) t += `${q.comando}\n`;
+      t += `${q.enunciado}\n`;
+      if (q.tipo === 'multipla') LETRAS.split('').filter(x => q.alternativas[x]).forEach(x => { t += `(${x}) ${q.alternativas[x]}\n`; });
+      t += gb ? `Gabarito: (${nomeResposta(q, gb.resposta)}) — ${gb.comentario || ''}\n` : 'Gabarito: sem gabarito disponível.\n';
+      t += '----------------------------------------\n\n';
+    });
+    return t;
+  }
+  els.btnCopyPersist.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(textoErrouSempre()); toast('✅ Questões copiadas.'); }
+    catch (e) { toast('Não foi possível copiar — use "Baixar .txt".'); }
+  });
+  els.btnDownloadPersist.addEventListener('click', () => {
+    const g = grupoDe(evo.grupoId);
+    const nome = `${g ? g.titulo : 'simulado'}`.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '').slice(0, 60);
+    baixarArquivo(`errou-sempre-${nome}-${new Date().toISOString().slice(0, 10)}.txt`, textoErrouSempre());
+  });
+
+  /* Resultado de uma nova tentativa ou revisão: compara com a anterior */
+  async function renderizarComparacao() {
+    const s = app.sessao, r = app.resumo;
+    const box = els.resultCompare;
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    if (!s) return;
+    const m = meta(s);
+    const g = grupoDe(m.grupoId);
+    const outros = g ? g.itens.filter(x => x.id !== s.id) : [];
+    if (!outros.length) return;
+
+    let base = null;
+    if (m.tipo === 'revisao') base = m.baseId ? hist.todos.find(x => x.id === m.baseId) : null;
+    else base = g.tentativas.filter(x => x.id !== s.id && x.data < r.data).pop() || null;
+
+    let html = '';
+    if (base) {
+      let det = null;
+      try { det = await Repo.carregarDetalhes(base.id); } catch (e) { console.error(e); }
+      if (app.sessao !== s) return; // usuário já saiu da tela
+      let corr = 0, novas = 0;
+      if (det) {
+        s.questoes.forEach(q => {
+          const bq = det.questoes.find(x => x.key === q.key);
+          if (!bq) return;
+          const agora = situacao(q, s), antes = situacao(bq, det);
+          if (agora === 'certa' && (antes === 'errada' || antes === 'branco')) corr++;
+          if ((agora === 'errada' || agora === 'branco') && antes === 'certa') novas++;
+        });
+      }
+      const rotBase = meta(base).tipo === 'revisao' ? 'revisão' : `tentativa ${meta(base).tentativa}`;
+      if (m.tipo === 'revisao') {
+        html = `🔁 <strong>Revisão</strong> de ${plural(s.questoes.length, 'questão', 'questões')} da ${rotBase} (${esc(fmtData(base.data))}): ` +
+          `acertou <strong>${r.acertos} de ${r.consideradas}</strong>` + (det ? ` · ${plural(corr, 'corrigida', 'corrigidas')}` : '') + '.';
+      } else {
+        const d = r.percentual - (base.percentual || 0);
+        const cls = d > 0 ? 'evo-up' : d < 0 ? 'evo-down' : 'evo-eq';
+        html = `📈 Comparado à ${rotBase} (${esc(fmtData(base.data))}): <strong class="${cls}">${d > 0 ? '+' : ''}${d} p.p.</strong> ` +
+          `(${base.percentual}% → ${r.percentual}%)` +
+          (det ? ` · ${plural(corr, 'questão corrigida', 'questões corrigidas')} · ${plural(novas, 'nova errada', 'novas erradas')}` : '') + '.';
+      }
+    } else {
+      html = `📊 Este simulado tem ${plural(g.itens.length, 'registro', 'registros')} entre tentativas e revisões.`;
+    }
+    box.innerHTML = `<span>${html}</span><button type="button" class="btn-secondary btn-small" data-evo="${esc(m.grupoId)}">📊 Ver evolução</button>`;
+    box.classList.remove('hidden');
+  }
+  els.resultCompare.addEventListener('click', e => {
+    const b = e.target.closest('[data-evo]');
+    if (b) abrirGrupo(b.dataset.evo);
   });
 
   els.btnClearHistory.addEventListener('click', async () => {
