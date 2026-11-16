@@ -363,6 +363,26 @@ button:disabled { opacity: .5; cursor: not-allowed }
 .shortcuts td { padding: 7px 4px; border-bottom: 1px solid var(--border); vertical-align: top }
 .shortcuts td:first-child { white-space: nowrap; padding-right: 16px }
 
+/* ---------- Sobre ---------- */
+.btn-icon { position: relative }
+.btn-icon.has-news::after {
+  content: ''; position: absolute; top: 6px; right: 6px; width: 9px; height: 9px;
+  border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--card);
+}
+.about-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 4px }
+.about-version { font-size: 1.6rem; font-weight: 700; color: var(--primary) }
+.about-sub { font-size: .88rem; color: var(--muted); margin-bottom: 16px }
+.about-badge { font-size: .7rem; font-weight: 700; text-transform: uppercase; padding: 2px 8px; border-radius: 20px; background: var(--success-bg); color: var(--success) }
+.about-release { border-left: 3px solid var(--border); padding: 2px 0 2px 14px; margin-bottom: 16px }
+.about-release.atual { border-left-color: var(--primary) }
+.about-release h4 { font-size: .95rem; margin-bottom: 4px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap }
+.about-release h4 .v { color: var(--primary) }
+.about-release h4 .d { font-size: .78rem; color: var(--muted); font-weight: 500 }
+.about-release ul { margin-left: 18px; font-size: .88rem; color: var(--text-soft) }
+.about-release li { margin-bottom: 3px }
+.about-older summary { cursor: pointer; font-size: .88rem; font-weight: 600; color: var(--primary); margin: 4px 0 12px }
+.about-foot { font-size: .8rem; color: var(--muted); border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px }
+
 /* ---------- Toast ---------- */
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none;

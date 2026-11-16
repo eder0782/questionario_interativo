@@ -24,6 +24,7 @@
           <button type="button" class="btn-secondary btn-small" id="btn-logout">Sair</button>
         </div>
       </div>
+      <button type="button" class="btn-icon" id="btn-about" title="Sobre o app e novidades" aria-label="Sobre o app">ℹ️</button>
       <button type="button" class="btn-icon" id="btn-help" title="Atalhos de teclado (?)" aria-label="Atalhos de teclado">⌨️</button>
       <button type="button" class="btn-icon" id="btn-theme" title="Alternar tema claro/escuro" aria-label="Alternar tema">🌙</button>
     </div>
@@ -49,7 +50,7 @@
           <input type="file" id="file-questions" accept=".txt,.md,text/plain" hidden>
         </label>
       </div>
-      <p class="hint">Aceita múltipla escolha — <code>(A)</code>, <code>A)</code> ou <code>a)</code> — e itens Certo/Errado. Cabeçalhos "MÓDULO" viram assuntos no resultado; o texto-base vale para o intervalo declarado. Você também pode arrastar um arquivo .txt para a caixa.</p>
+      <p class="hint">Aceita múltipla escolha — <code>(A)</code>, <code>A)</code> ou <code>a)</code> — e itens Certo/Errado. Cabeçalhos "MÓDULO" viram assuntos no resultado; o texto-base vale para o intervalo declarado. Você também pode arrastar um arquivo .txt para a caixa.<br>Destaques: <code>**negrito**</code> e <code>*itálico*</code>. Ao colar do Word ou do Google Docs, o negrito, o itálico e o sublinhado são convertidos sozinhos.</p>
       <textarea id="input-questions" placeholder="Cole aqui as questões..." spellcheck="false"></textarea>
       <div id="status-questions" class="status empty" role="status">Nenhuma questão importada.</div>
     </div>
@@ -282,6 +283,20 @@
   </div>
 </div>
 
+<!-- Modal: sobre -->
+<div id="about-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="about-title">
+  <div class="modal-content modal-small">
+    <div class="modal-header">
+      <h3 id="about-title">ℹ️ Sobre o Simulado Interativo</h3>
+      <button type="button" class="btn-close" data-close-modal aria-label="Fechar">&times;</button>
+    </div>
+    <div class="modal-body" id="about-body"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn-primary" data-close-modal>Fechar</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <!-- Firebase (SDK compat). Se não carregar, o app segue no modo local. -->
@@ -289,6 +304,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check-compat.js"></script>
+<script src="versao.js"></script>
 <script src="firebase-config.js"></script>
 <script src="parser.js"></script>
 <script src="storage.js"></script>

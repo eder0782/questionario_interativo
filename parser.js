@@ -23,6 +23,38 @@
 
   const SEQ = 'ABCDE';
 
+  /* ---------- Marcações de destaque (**negrito**, *itálico*) ----------
+     O texto pode trazer destaques vindos do Word. Aqui só limpamos as
+     marcações que atrapalham a leitura da estrutura (número da questão,
+     letra da alternativa, resposta do gabarito); o resto é mantido e
+     exibido com destaque pelo app. */
+  // "**1.** Texto", "**1. Texto todo em negrito**", "*Questão 2*" → sem a marcação em volta do número
+  function limparPrefixo(linha) {
+    const m = linha.match(/^(\s*)(\*\*|\*)(?=\s*(?:quest[ãa]o\s*(?:n[º°o.]?\s*)?)?\d{1,3}\b)/i);
+    if (!m) return linha;
+    const mk = m[2];
+    let s = m[1] + linha.slice(m[0].length);
+    const esc = mk.replace(/\*/g, '\\*');
+    // 1º caso: só o número em negrito → "**1.** texto"
+    const soNumero = new RegExp(`^(\\s*(?:quest[ãa]o\\s*(?:n[º°o.]?\\s*)?)?\\d{1,3}\\s*[.):\\-–—]?)${esc}`, 'i');
+    if (soNumero.test(s)) return s.replace(soNumero, '$1');
+    // 2º caso: a linha inteira em negrito → "**1. texto**"
+    const fim = new RegExp(`${esc}\\s*$`);
+    if (fim.test(s)) return s.replace(fim, '');
+    // senão, remove a primeira marcação seguinte
+    const fecha = s.indexOf(mk, m[1].length);
+    if (fecha >= 0) s = s.slice(0, fecha) + s.slice(fecha + mk.length);
+    return s;
+  }
+
+  // "**(A)** texto" / "*b)* texto" → "(A) texto"
+  const RE_ALT_MARCADA = new RegExp(`(\\*\\*|\\*)(\\(?[A-Ea-e]\\))\\1`, 'g');
+
+  // Gabarito: "1. **C** — ..." → "1. C — ..."
+  const RE_GAB_MARCADO = /^(\s*(?:quest[ãa]o\s*(?:n[º°o.]?\s*)?)?\d{1,3}\s*[.)\-–—:]?\s*(?:(?:letra|gabarito|resposta|alternativa)\s*:?\s*)?)(\*\*|\*)(\(?[A-Za-zÀ-ú]+\)?)\2/i;
+
+  const semMarcas = t => String(t || '').replace(/\*+/g, '');
+
   /* ---------- Utilidades ---------- */
   function matchQuestao(t) {
     let m = t.match(RE_QUESTAO_PREFIXO);
@@ -33,7 +65,7 @@
   }
 
   function nomeModulo(t) {
-    return t.replace(/^[^\p{L}\p{N}]+/u, '').replace(/\s+/g, ' ').trim();
+    return semMarcas(t).replace(/^[^\p{L}\p{N}]+/u, '').replace(/\s+/g, ' ').trim();
   }
 
   function getCabecalhoTexto(txt) {
@@ -129,7 +161,8 @@
     const cabecalho = conteudo[0] || '';
     const depois = cabecalho.slice(cab.fimIntervalo);
     const corte = depois.search(/[.:]/);
-    const sobra = corte >= 0 ? depois.slice(corte + 1).trim() : '';
+    let sobra = corte >= 0 ? depois.slice(corte + 1).trim() : '';
+    sobra = sobra.replace(/^\*+(\s|$)/, '').trim(); // fecha-negrito do cabeçalho ("...questões 1 a 3:**")
     let raw = [sobra, ...conteudo.slice(1)].join('\n').trim();
     raw = raw.replace(/^["“”'‘’]+/, '').replace(/["“”'‘’]+$/, '').trim();
 
@@ -163,7 +196,8 @@
      ========================================================= */
   function importarQuestoes(texto) {
     if (!texto || !texto.trim()) return [];
-    const linhas = texto.replace(/\r\n?/g, '\n').split('\n');
+    const linhas = texto.replace(/\r\n?/g, '\n').split('\n')
+      .map(l => limparPrefixo(l).replace(RE_ALT_MARCADA, '$2'));
     const questoes = [];
 
     let modulo = null;
@@ -262,7 +296,8 @@
 
   function importarGabarito(texto) {
     if (!texto || !texto.trim()) return [];
-    const linhas = texto.replace(/\r\n?/g, '\n').split('\n');
+    const linhas = texto.replace(/\r\n?/g, '\n').split('\n')
+      .map(l => limparPrefixo(l).replace(RE_GAB_MARCADO, '$1$3'));
     const entradas = [];
     let atual = null;
 
