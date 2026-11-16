@@ -73,7 +73,16 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  const paragrafosHtml = texto => String(texto || '').split(/\n{2,}/).map(p => `<p>${esc(p)}</p>`).join('');
+  /* Destaques no texto: **negrito** e *itálico*.
+     Escapa o HTML primeiro (segurança) e só depois troca as marcações.
+     As fronteiras evitam falsos destaques em código, como 2**10 ou a * b * c. */
+  function fmt(texto) {
+    return esc(texto)
+      .replace(/(^|[^\w*])\*\*(?!\s)([^\n]+?)(?<!\s)\*\*(?![\w*])/g, '$1<strong>$2</strong>')
+      .replace(/(^|[^\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])/g, '$1<em>$2</em>');
+  }
+
+  const paragrafosHtml = texto => String(texto || '').split(/\n{2,}/).map(p => `<p>${fmt(p)}</p>`).join('');
 
   /* =========================================================
      MÓDULO 2 — ESTADO E ELEMENTOS
@@ -96,7 +105,7 @@
     'input-title', 'opt-meta', 'opt-shuffle-q', 'opt-shuffle-alt',
     'btn-example', 'btn-clear', 'btn-start',
     'history-list', 'hist-toolbar', 'hist-search', 'hist-per-page', 'hist-pagination', 'btn-export-backup', 'file-backup', 'btn-clear-history', 'storage-note',
-    'btn-help', 'btn-theme',
+    'btn-help', 'btn-theme', 'btn-about', 'about-modal', 'about-body',
     'account-area', 'btn-login', 'account-user', 'account-photo', 'account-name', 'btn-copy-uid', 'btn-logout',
     'quiz-layout', 'text-side', 'text-side-title', 'text-side-body',
     'question-card', 'progress-bar', 'progress-fill', 'question-counter', 'question-origin',
@@ -232,6 +241,16 @@
     // Arrastar e soltar arquivo .txt
     ta.addEventListener('dragover', e => { e.preventDefault(); ta.classList.add('drag-over'); });
     ta.addEventListener('dragleave', () => ta.classList.remove('drag-over'));
+    // Colar do Word/Google Docs: mantém negrito e itálico como **…** e *…*
+    ta.addEventListener('paste', e => {
+      const html = e.clipboardData && e.clipboardData.getData('text/html');
+      if (!html || !/<(b|strong|i|em|u)\b|font-weight|font-style|text-decoration/i.test(html)) return; // sem formatação: colagem normal
+      const texto = htmlParaMarcacoes(html);
+      if (!texto.trim()) return;
+      e.preventDefault();
+      ta.setRangeText(texto, ta.selectionStart, ta.selectionEnd, 'end');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    });
     ta.addEventListener('drop', async e => {
       ta.classList.remove('drag-over');
       const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
@@ -241,6 +260,64 @@
       atualizarStatusImportacao(); salvarRascunho();
     });
   });
+
+  /* Converte o HTML da área de transferência em texto com marcações.
+     Sublinhado vira negrito (o app não usa sublinhado, que confundiria com links). */
+  function htmlParaMarcacoes(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const segs = []; // { t, b, i } ou { nl: true }
+    const BLOCOS = /^(P|DIV|LI|H[1-6]|TR|BLOCKQUOTE|PRE|TABLE|UL|OL)$/;
+    const novaLinha = () => segs.push({ nl: true });
+
+    function estilo(el, herdado) {
+      const st = (el.getAttribute('style') || '').toLowerCase().replace(/\s+/g, '');
+      const tag = el.tagName;
+      let b = herdado.b, i = herdado.i;
+      if (tag === 'B' || tag === 'STRONG' || tag === 'U' || /font-weight:(bold|[6-9]00)/.test(st) || /text-decoration[^;]*underline/.test(st)) b = true;
+      if (/font-weight:(normal|[1-5]00)/.test(st)) b = false; // Google Docs envolve tudo num <b style="font-weight:normal">
+      if (tag === 'I' || tag === 'EM' || /font-style:italic/.test(st)) i = true;
+      if (/font-style:normal/.test(st)) i = false;
+      return { b, i };
+    }
+
+    (function andar(no, herdado) {
+      for (const filho of no.childNodes) {
+        if (filho.nodeType === 3) {
+          const t = filho.nodeValue.replace(/[\r\n\t ]+/g, ' ').replace(/\u00a0/g, ' ');
+          if (t) segs.push({ t, b: herdado.b, i: herdado.i });
+        } else if (filho.nodeType === 1) {
+          const tag = filho.tagName;
+          const st = (filho.getAttribute('style') || '').toLowerCase();
+          if (/^(STYLE|SCRIPT|HEAD|META|TITLE|XML)$/.test(tag) || /display:\s*none|mso-hide:\s*all/.test(st)) continue;
+          if (tag === 'BR') { novaLinha(); continue; }
+          if (tag === 'TD' || tag === 'TH') segs.push({ t: ' ', b: false, i: false });
+          andar(filho, estilo(filho, herdado));
+          if (BLOCOS.test(tag)) novaLinha();
+        }
+      }
+    })(doc.body, { b: false, i: false });
+
+    // Junta trechos vizinhos com o mesmo estilo e envolve com as marcações,
+    // deixando os espaços das pontas fora delas ("**pois** ," e não "**pois **,")
+    let saida = '';
+    let k = 0;
+    while (k < segs.length) {
+      if (segs[k].nl) { saida += '\n'; k++; continue; }
+      const { b, i } = segs[k];
+      let txt = '';
+      while (k < segs.length && !segs[k].nl && segs[k].b === b && segs[k].i === i) { txt += segs[k].t; k++; }
+      if (!b && !i) { saida += txt; continue; }
+      const m = txt.match(/^(\s*)([\s\S]*?)(\s*)$/);
+      if (!m[2]) { saida += txt; continue; }
+      const mk = (b ? '**' : '') + (i ? '*' : '');
+      const mkFim = (i ? '*' : '') + (b ? '**' : '');
+      saida += m[1] + mk + m[2] + mkFim + m[3];
+    }
+    return saida
+      .split('\n').map(l => l.replace(/ {2,}/g, ' ').trim()).join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
 
   function ligarArquivo(input, textarea) {
     input.addEventListener('change', async () => {
@@ -479,7 +556,7 @@ MÓDULO 2
 
     // Comando (ex.: "Julgue os itens a seguir")
     if (q.comando) {
-      els.comandoContainer.textContent = q.comando;
+      els.comandoContainer.innerHTML = fmt(q.comando);
       els.comandoContainer.classList.remove('hidden');
     } else {
       els.comandoContainer.classList.add('hidden');
@@ -498,7 +575,7 @@ MÓDULO 2
       els.textSideBody.innerHTML = '<p class="empty-text">Esta questão não tem texto-base.</p>';
     }
 
-    els.questionText.textContent = q.enunciado ? `${q.numero}. ${q.enunciado}` : `${q.numero}.`;
+    els.questionText.innerHTML = fmt(q.enunciado ? `${q.numero}. ${q.enunciado}` : `${q.numero}.`);
 
     // Alternativas
     const resp = s.respostas[q.key];
@@ -527,7 +604,7 @@ MÓDULO 2
           else if (o.orig === resp) b.classList.add('wrong');
         }
       }
-      b.innerHTML = `<span class="option-letter">(${o.rotulo})</span><span class="option-text">${esc(o.texto)}</span>`;
+      b.innerHTML = `<span class="option-letter">(${o.rotulo})</span><span class="option-text">${fmt(o.texto)}</span>`;
       b.addEventListener('click', () => selecionar(o.orig));
       b.addEventListener('contextmenu', e => { e.preventDefault(); alternarRisco(o.orig); });
       row.appendChild(b);
@@ -581,7 +658,7 @@ MÓDULO 2
     els.feedback.className = `feedback ${cls}`;
     els.feedback.innerHTML =
       `<div class="fb-title">${esc(titulo)}</div>` +
-      (g && g.comentario ? `<div>${esc(g.comentario)}</div>` : '') +
+      (g && g.comentario ? `<div>${fmt(g.comentario)}</div>` : '') +
       (nota ? `<div class="fb-note">${esc(nota)}</div>` : '');
   }
 
@@ -915,13 +992,13 @@ MÓDULO 2
         let cls = 'opt';
         if (g && g.resposta === l) cls += ' correct';
         if (resp === l && (!g || g.resposta !== l)) cls += ' wrong';
-        return `<div class="${cls}">(${l}) ${esc(q.alternativas[l])}</div>`;
+        return `<div class="${cls}">(${l}) ${fmt(q.alternativas[l])}</div>`;
       }).join('');
 
       const comentario = g
         ? (g.resposta === 'X'
-          ? `<div class="comment"><strong>Questão anulada.</strong> ${esc(g.comentario)}</div>`
-          : `<div class="comment"><strong>Gabarito:</strong> (${esc(nomeResposta(q, g.resposta))})${g.comentario ? ' — ' + esc(g.comentario) : ''}</div>`)
+          ? `<div class="comment"><strong>Questão anulada.</strong> ${fmt(g.comentario)}</div>`
+          : `<div class="comment"><strong>Gabarito:</strong> (${esc(nomeResposta(q, g.resposta))})${g.comentario ? ' — ' + fmt(g.comentario) : ''}</div>`)
         : '<div class="comment"><em>Sem gabarito disponível.</em></div>';
 
       const item = document.createElement('div');
@@ -933,8 +1010,8 @@ MÓDULO 2
           ${m.chute ? '<span title="Chute">🎲</span>' : ''}${m.revisar ? '<span title="Marcada para revisar">🚩</span>' : ''}
           <span class="item-meta">⏱ ${fmtTempo(s.tempos[q.key] || 0)}</span>
         </h3>
-        ${q.comando ? `<div class="comando">${esc(q.comando)}</div>` : ''}
-        <div class="enunciado">${esc(q.enunciado)}</div>
+        ${q.comando ? `<div class="comando">${fmt(q.comando)}</div>` : ''}
+        <div class="enunciado">${fmt(q.enunciado)}</div>
         <div class="result-options">${opcoes}</div>
         ${comentario}`;
       els.resultList.appendChild(item);
@@ -1363,6 +1440,41 @@ MÓDULO 2
   els.btnShowText.addEventListener('click', () => abrirTexto(qAtual()));
   els.btnHelp.addEventListener('click', () => abrirModal(els.helpModal));
 
+  /* Sobre: versão atual e histórico de melhorias (versao.js) */
+  const VERSAO = window.SIMULADO_VERSAO || { atual: '?', historico: [] };
+  const fmtDia = iso => iso ? iso.split('-').reverse().join('/') : '';
+
+  function renderizarSobre() {
+    const lista = VERSAO.historico || [];
+    const bloco = (r, atual) => `
+      <div class="about-release${atual ? ' atual' : ''}">
+        <h4><span class="v">v${esc(r.versao)}</span> ${esc(r.titulo)} <span class="d">${esc(fmtDia(r.data))}</span></h4>
+        <ul>${(r.itens || []).map(i => `<li>${fmt(i)}</li>`).join('')}</ul>
+      </div>`;
+    const [ultima, ...anteriores] = lista;
+    const modo = Repo.adapter && Repo.adapter.tipo === 'nuvem' ? '☁️ dados sincronizados com a sua conta Google' : '💾 dados salvos neste navegador';
+    els.aboutBody.innerHTML = `
+      <div class="about-head"><span class="about-version">v${esc(VERSAO.atual)}</span><span class="about-badge">versão atual</span></div>
+      <p class="about-sub">Para responder questionários e estudar para concursos · ${modo}</p>
+      ${ultima ? `<h3 class="field-label" style="margin-bottom:8px">Novidades desta versão</h3>${bloco(ultima, true)}` : ''}
+      ${anteriores.length ? `<details class="about-older"><summary>Versões anteriores (${anteriores.length})</summary>${anteriores.map(r => bloco(r, false)).join('')}</details>` : ''}
+      <p class="about-foot">Atalhos de teclado: tecle <kbd>?</kbd> ou clique em ⌨️.</p>`;
+  }
+
+  function marcarNovidades() {
+    els.btnAbout.classList.toggle('has-news', app.prefs.versaoVista !== VERSAO.atual);
+  }
+
+  els.btnAbout.addEventListener('click', () => {
+    renderizarSobre();
+    abrirModal(els.aboutModal);
+    if (app.prefs.versaoVista !== VERSAO.atual) {
+      app.prefs.versaoVista = VERSAO.atual;
+      salvarPreferencias();
+      marcarNovidades();
+    }
+  });
+
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') { if (modalAberto()) fecharModais(); return; }
     if (modalAberto()) return;
@@ -1438,6 +1550,7 @@ MÓDULO 2
     }
     atualizarStatusImportacao();
     atualizarNotaArmazenamento();
+    marcarNovidades();
     await verificarSessaoPendente();
     await renderizarHistorico();
   }
