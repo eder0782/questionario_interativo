@@ -9,8 +9,16 @@
      - CORREÇÃO: ajuste ou correção pequena.
    ========================================================= */
 window.SIMULADO_VERSAO = {
-  atual: '2.6.2',
+  atual: '2.6.3',
   historico: [
+    {
+      versao: '2.6.3',
+      data: '2026-11-21',
+      titulo: 'Correção em questões de SQL',
+      itens: [
+        'Expressões como COUNT(*) não são mais confundidas com marcação de itálico: o trecho entre dois COUNT(*) na mesma linha deixava de aparecer normal.'
+      ]
+    },
     {
       versao: '2.6.2',
       data: '2026-11-16',

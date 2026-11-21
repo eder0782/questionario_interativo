@@ -79,7 +79,7 @@
   function fmt(texto) {
     return esc(texto)
       .replace(/(^|[^\w*])\*\*(?!\s)([^\n]+?)(?<!\s)\*\*(?![\w*])/g, '$1<strong>$2</strong>')
-      .replace(/(^|[^\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])/g, '$1<em>$2</em>');
+      .replace(/(^|[^\w*])\*(?![\s)])([^*\n]+?)(?<![\s(])\*(?![\w*])/g, '$1<em>$2</em>'); // "(*)" (COUNT(*)) não é itálico
   }
 
   /* Impressão digital do conjunto de questões (independe da ordem):
