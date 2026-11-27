@@ -77,6 +77,16 @@
      Escapa o HTML primeiro (segurança) e só depois troca as marcações.
      As fronteiras evitam falsos destaques em código, como 2**10 ou a * b * c. */
   function fmt(texto) {
+    const s = String(texto == null ? '' : texto);
+    if (s.includes('```')) {
+      // Blocos de código: mostrados como estão, sem negrito/itálico
+      return s.split(/```\n?([\s\S]*?)\n?```/).map((parte, i) => i % 2
+        ? `<pre class="code-block"><code>${esc(parte)}</code></pre>`
+        : fmtTexto(parte.replace(/^\n+|\n+$/g, ''))).join('');
+    }
+    return fmtTexto(s);
+  }
+  function fmtTexto(texto) {
     return esc(texto)
       .replace(/(^|[^\w*])\*\*(?!\s)([^\n]+?)(?<!\s)\*\*(?![\w*])/g, '$1<strong>$2</strong>')
       .replace(/(^|[^\w*])\*(?![\s)])([^*\n]+?)(?<![\s(])\*(?![\w*])/g, '$1<em>$2</em>'); // "(*)" (COUNT(*)) não é itálico

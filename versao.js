@@ -9,8 +9,17 @@
      - CORREÇÃO: ajuste ou correção pequena.
    ========================================================= */
 window.SIMULADO_VERSAO = {
-  atual: '2.6.3',
+  atual: '2.7.0',
   historico: [
+    {
+      versao: '2.7.0',
+      data: '2026-11-26',
+      titulo: 'Blocos de código nas questões',
+      itens: [
+        'Trechos de código entre ``` (três crases) aparecem com fonte de código e com a indentação preservada — essencial em Python.',
+        'O leitor não confunde mais trechos como print(a) dentro do código com a alternativa "a)".'
+      ]
+    },
     {
       versao: '2.6.3',
       data: '2026-11-21',

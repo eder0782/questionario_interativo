@@ -85,6 +85,19 @@
    * Quebra quando: linha em branco, início de lista (I -, a), •, 1.),
    * ou frase anterior terminou e a nova começa com maiúscula.
    */
+  /* Blocos de código (entre ```) viram marcadores enquanto o bloco é analisado,
+     para que "print(a)" não seja lido como alternativa "a)" e a indentação não se perca. */
+  const RE_COD = /^\u27E6COD(\d+)\u27E7$/;
+  function mascararCodigo(bloco) {
+    const codigos = [];
+    const mascarado = bloco.replace(/^[ \t]*```[^\n]*\n([\s\S]*?)\n?[ \t]*```[ \t]*$/gm, (m, c) => {
+      codigos.push(c.replace(/\s+$/, ''));
+      return '\n\u27E6COD' + (codigos.length - 1) + '\u27E7\n';
+    });
+    const restaurar = (txt) => txt.replace(/\u27E6COD(\d+)\u27E7/g, (m, n) => '```\n' + codigos[+n] + '\n```');
+    return { mascarado, restaurar };
+  }
+
   function juntarParagrafos(linhas, { quebraCurta = false } = {}) {
     const pars = [];
     let atual = '';
@@ -93,6 +106,11 @@
       const l = bruta.trim();
       if (!l) {
         if (atual) { pars.push(atual); atual = ''; }
+        continue;
+      }
+      if (RE_COD.test(l)) {           // bloco de código: sempre parágrafo próprio
+        if (atual) pars.push(atual);
+        pars.push(l); atual = '';
         continue;
       }
       if (!atual) { atual = l; continue; }
@@ -171,8 +189,12 @@
   }
 
   function construirQuestao(cur) {
-    const bloco = cur.linhas.join('\n').trim();
-    const alts = extrairAlternativas(bloco);
+    const { mascarado: bloco, restaurar } = mascararCodigo(cur.linhas.join('\n').trim());
+    const alts0 = extrairAlternativas(bloco);
+    const alts = alts0 && {
+      inicio: alts0.inicio,
+      mapa: Object.fromEntries(Object.entries(alts0.mapa).map(([k, v]) => [k, restaurar(v)]))
+    };
     const base = {
       numero: cur.numero,
       modulo: cur.modulo,
@@ -181,12 +203,12 @@
       comando: cur.comando
     };
     if (alts) {
-      const enunciado = juntarParagrafos(bloco.slice(0, alts.inicio).split('\n')).join('\n');
+      const enunciado = restaurar(juntarParagrafos(bloco.slice(0, alts.inicio).split('\n')).join('\n'));
       return { ...base, tipo: 'multipla', enunciado, alternativas: alts.mapa, ceExplicito: false };
     }
     const ceExplicito = RE_MARCA_CE.test(bloco);
     const limpo = bloco.replace(RE_MARCA_CE_G, ' ');
-    const enunciado = juntarParagrafos(limpo.split('\n')).join('\n').trim();
+    const enunciado = restaurar(juntarParagrafos(limpo.split('\n')).join('\n').trim());
     if (!enunciado) return null;
     return { ...base, tipo: 'ce', enunciado, alternativas: { C: 'Certo', E: 'Errado' }, ceExplicito };
   }
@@ -206,6 +228,8 @@
     let comando = null;       // linhas do comando "Julgue os itens..."
     let comandoAberto = false;
     let cur = null;
+    let emCodigo = false;     // dentro de um bloco ``` ... ```
+    const brutas = texto.replace(/\r\n?/g, '\n').split('\n');
 
     const fechar = () => {
       if (cur) {
@@ -223,6 +247,14 @@
 
     for (let i = 0; i < linhas.length; i++) {
       const t = linhas[i].trim();
+
+      // Bloco de código: guarda as linhas como estão (com a indentação)
+      if (/^```/.test(brutas[i].trim())) {
+        emCodigo = !emCodigo;
+        if (cur) cur.linhas.push(brutas[i].trim());
+        continue;
+      }
+      if (emCodigo) { if (cur) cur.linhas.push(brutas[i].replace(/\s+$/, '')); continue; }
 
       if (!t) { if (cur) cur.linhas.push(''); continue; }
 
